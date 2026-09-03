@@ -13,13 +13,16 @@ canvas { display: block; max-width: 100vw; max-height: 100vh; }
 <div id="game"></div>
 <input type="file" id="fileInput" accept="image/*" style="display:none">
 <script src="https://cdn.jsdelivr.net/npm/phaser@4.2.1/dist/phaser.min.js" integrity="sha384-kyUQ5+cxc6+X89xEG6DhcXLcDU9T3Z+o/45VdT6pgAwtG6gxtAzYTEn0Wwj/BKZd" crossorigin="anonymous"></script>
+<script src="bfs.js"></script>
 <script>
 'use strict';
 
 // ============ 配置（初始值，启动后由图片决定） ============
 let COLS = 100, ROWS = 50;
-const CELL = 8;
+let CELL = 8;
 const BLANK_ROWS = 5;
+const TARGET_W = 800;      // 棋盘目标宽度（像素），格子大小按此缩放
+let BOARD_MAX_DIM = 100;   // 棋盘尺寸上限（最长边）
 let CANVAS_W = 800;
 let CANVAS_H = 1080;
 
@@ -32,17 +35,17 @@ let DARK_COLORS = [
   0x0e5e50, 0x1c5a82, 0x642e78, 0x1a2e3a,
 ];
 
-const PLATE_COLS = [8, 24, 40, 56, 72, 88];
+let PLATE_COLS = [8, 24, 40, 56, 72, 88];
 let UI_Y = (ROWS + BLANK_ROWS) * CELL;
 
 // ============ 游戏状态 ============
 let grid = [];
-let colorQueues = [];
+let plateBFS = [];
 let movingAnimals = [];
 let queues, plates;
 let bfsPending = false;
 let gameRunning = false;
-let bfsDist, bfsParent, bfsFrontier;
+let foodSeq = 0;
 
 // ============ 棋盘生成 ============
 function generateGrid() {
@@ -92,73 +95,10 @@ function distributeToQueues(allFoods) {
   return q;
 }
 
-// ============ BFS 全局增量扩散 ============
-function initBFS() {
-  bfsDist = new Map();
-  bfsParent = new Map();
-  bfsFrontier = [];
-  colorQueues = Array(COLORS.length).fill(null).map(() => []);
-  for (let c = 0; c < COLS; c++)
-    for (let r = ROWS; r < ROWS + BLANK_ROWS; r++) {
-      bfsDist.set(`${r},${c}`, 0);
-      bfsFrontier.push({ row: r, col: c });
-    }
-  expandBFS();
-}
+// ============ BFS 已收敛到 bfs.js 的 BFS 类，通过全局 plateBFS 数组按盘子下标调用 ============
 
-function expandBFS() {
-  while (bfsFrontier.length > 0) {
-    const { row, col } = bfsFrontier.shift();
-    const curDist = bfsDist.get(`${row},${col}`);
-    for (const [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
-      const nr = row + dr, nc = col + dc;
-      if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
-      const key = `${nr},${nc}`;
-      if (bfsDist.has(key)) continue;
-      const cell = grid[nr][nc];
-      bfsDist.set(key, curDist + 1);
-      bfsParent.set(key, { row, col });
-      if (cell === -1) bfsFrontier.push({ row: nr, col: nc });
-      else if (cell >= 0 && cell < COLORS.length) colorQueues[cell].push({ row: nr, col: nc, distance: curDist + 1 });
-    }
-  }
-}
-
-function onCellBecameBlank(row, col) {
-  bfsDist.set(`${row},${col}`, 0);
-  bfsFrontier.push({ row, col });
-  expandBFS();
-}
-
-function tracePathFromBFS(animalRow, animalCol) {
-  const path = [];
-  let current = { row: animalRow, col: animalCol };
-  while (bfsParent.has(`${current.row},${current.col}`)) {
-    path.push({ row: current.row, col: current.col });
-    current = bfsParent.get(`${current.row},${current.col}`);
-  }
-  path.push({ row: current.row, col: current.col });
-  return path;
-}
-
-// 从空白通道到食物位置的路径（Bresenham 直线，斜着走过去）
-function extendPathToFood(path, foodCol) {
-  const last = path[path.length - 1];
-  let x0 = last.col, y0 = last.row;
-  const x1 = foodCol, y1 = ROWS + BLANK_ROWS;
-  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
-  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy;
-  const line = [];
-  // 先推进，到达后再加入终点
-  while (x0 !== x1 || y0 !== y1) {
-    const e2 = 2 * err;
-    if (e2 > -dy) { err -= dy; x0 += sx; }
-    if (e2 < dx) { err += dx; y0 += sy; }
-    line.push({ row: y0, col: x0 });
-  }
-  // 终点由 doBFS 设置 isFood 标记
-  return [...path, ...line];
+function markBlankBroadcast(row, col) {
+  plateBFS.forEach(b => b.markBlank(row, col));
 }
 
 function triggerBFS() {
@@ -169,43 +109,36 @@ function doBFS() {
   bfsPending = false;
   const activeFoods = plates.filter(p => p !== null && p.active);
   if (activeFoods.length === 0) return;
-  // 优先填满剩余最少的食物
-  activeFoods.sort((a, b) => a.remaining - b.remaining);
-  let anyNew = false;
+  // 每个颜色只保留最早放置（FIFO）且仍需派发的食物；已派发足够动物（available <= 0）的跳过，让同色下一个顶上
+  const earliestByColor = new Map();
   for (const food of activeFoods) {
+    if (food.remaining - food.attracted <= 0) continue;
+    const cur = earliestByColor.get(food.color);
+    if (!cur || food.seq < cur.seq) earliestByColor.set(food.color, food);
+  }
+  const foods = [...earliestByColor.values()];
+  // 优先填满剩余最少的食物
+  foods.sort((a, b) => a.remaining - b.remaining);
+  let anyNew = false;
+  for (const food of foods) {
     if (food.remaining <= 0) continue;
-    let queue = colorQueues[food.color];
-    // 如果颜色队列为空，全棋盘扫描该颜色的动物
-    if (queue.length === 0) {
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-          if (grid[r][c] === food.color) {
-            // 检查是否已在 BFS 状态中
-            if (!bfsDist.has(`${r},${c}`)) {
-              queue.push({ row: r, col: c, distance: 0 });
-            }
-          }
-        }
-      }
-    }
-    if (queue.length === 0) continue;
+    const b = plateBFS[food.plateIndex];
+    if (!b.hasAnimals(food.color)) continue;
     const available = food.remaining - food.attracted;
     if (available <= 0) continue;
-    const takeCount = Math.min(available, queue.length);
+    const animals = b.take(food.color, available);
     anyNew = true;
-    const animals = queue.splice(0, takeCount);
-    food.attracted += takeCount;
+    food.attracted += animals.length;
     animals.sort((a, b) => a.distance - b.distance);
     for (const att of animals) {
-      const path = tracePathFromBFS(att.row, att.col);
-      const fullPath = extendPathToFood(path, food.plateCol);
-      fullPath.shift();
-      if (fullPath.length > 0) fullPath[fullPath.length - 1].isFood = true;
+      const path = b.tracePath(att.row, att.col);
+      path.shift();
+      if (path.length > 0) path[path.length - 1].isFood = true;
       grid[att.row][att.col] = -1;
-      onCellBecameBlank(att.row, att.col);
+      markBlankBroadcast(att.row, att.col);
       movingAnimals.push({
         color: food.color, originRow: att.row, originCol: att.col,
-        row: att.row, col: att.col, path: fullPath,
+        row: att.row, col: att.col, path: path,
         speed: 3 + Math.floor(Math.random() * 3), // 3-5 帧/步（约 2 倍速） frame: 0,
         flying: false, flyFrame: 0, targetFood: food,
       });
@@ -233,8 +166,8 @@ class GameScene extends Phaser.Scene {
     this.foodLabels = [];
     for (let i = 0; i < 6; i++) {
       const t = this.add.text(0, 0, '', {
-        fontSize: '12px', color: '#333333', fontFamily: 'monospace', fontStyle: 'bold',
-      }).setOrigin(0.5);
+        fontSize: '12px', color: '#ffffff', fontFamily: 'monospace', fontStyle: 'bold',
+      }).setOrigin(0.5).setStroke('#000000', 3);
       this.foodLabels.push(t);
     }
 
@@ -244,8 +177,8 @@ class GameScene extends Phaser.Scene {
       this.queueLabels[qi] = [];
       for (let fi = 0; fi < 3; fi++) {
         const t = this.add.text(0, 0, '', {
-          fontSize: '11px', color: '#333333', fontFamily: 'monospace', fontStyle: 'bold',
-        }).setOrigin(0.5);
+          fontSize: '11px', color: '#ffffff', fontFamily: 'monospace', fontStyle: 'bold',
+        }).setOrigin(0.5).setStroke('#000000', 3);
         this.queueLabels[qi].push(t);
       }
     }
@@ -254,17 +187,11 @@ class GameScene extends Phaser.Scene {
     this.input.on('pointerdown', this.onPointerDown.bind(this));
 
     // 道具按钮
-    this.btnReshuffle = this.add.text(CANVAS_W / 2, CANVAS_H - 18, '重新排列队列', {
-      fontSize: '14px', color: '#333333', fontFamily: 'sans-serif',
-      backgroundColor: '#e94560', padding: { x: 16, y: 6 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+    this.btnReshuffle = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H - 18, '重新排列队列', 0xe94560, 14)
       .on('pointerdown', () => this.onReshuffle());
 
     // 再来一局按钮（初始隐藏）
-    this.btnRestart = this.add.text(CANVAS_W / 2, CANVAS_H - 18, '再来一局', {
-      fontSize: '14px', color: '#333333', fontFamily: 'sans-serif',
-      backgroundColor: '#27ae60', padding: { x: 16, y: 6 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+    this.btnRestart = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H - 18, '再来一局', 0x27ae60, 14)
       .on('pointerdown', () => this.resetGame())
       .setVisible(false);
 
@@ -281,27 +208,39 @@ class GameScene extends Phaser.Scene {
       fontSize: '18px', color: '#888888', fontFamily: 'sans-serif',
     }).setOrigin(0.5);
 
-    this.btnStart = this.add.text(CANVAS_W / 2, CANVAS_H / 2, '开始游戏', {
-      fontSize: '32px', color: '#333333', fontFamily: 'sans-serif',
-      backgroundColor: '#e94560', padding: { x: 32, y: 12 },
-    }).setOrigin(0.5).setDepth(1).setInteractive({ useHandCursor: true }).setVisible(false)
+    this.btnStart = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2, '开始游戏', 0xe94560, 32)
+      .setDepth(1).setVisible(false)
       .on('pointerdown', () => {
         this.startOverlay.destroy();
         this.loadingText.destroy();
         this.btnStart.destroy();
-        this.btnRefresh.destroy();
         gameRunning = true;
       });
 
-    this.btnRefresh = this.add.text(CANVAS_W / 2, CANVAS_H / 2 + 50, '换一张', {
-      fontSize: '16px', color: '#333333', fontFamily: 'sans-serif',
-      backgroundColor: '#555555', padding: { x: 20, y: 8 },
-    }).setOrigin(0.5).setDepth(1).setInteractive({ useHandCursor: true }).setVisible(false)
-      .on('pointerdown', () => this.loadRandomImage());
+    // 设置按钮（常驻，右上角）
+    this.btnSettings = this.makeCartoonButton(CANVAS_W - 50, 30, '设置', 0x3498db, 14)
+      .setDepth(1)
+      .on('pointerdown', () => this.openSettings());
+
+    // 设置面板
+    this.settingsOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.7)
+      .setVisible(false).setInteractive().setDepth(10);
+    this.settingsTitle = this.add.text(CANVAS_W / 2, CANVAS_H / 2 - 110, '棋盘大小', {
+      fontSize: '24px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(11).setVisible(false);
+    this.sizeButtons = [];
+    [20, 30, 50, 100].forEach((n, i) => {
+      const btn = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 - 50 + i * 40, n + '×' + n, 0x3498db, 16)
+        .setDepth(11).setVisible(false)
+        .on('pointerdown', () => this.applyBoardSize(n));
+      this.sizeButtons.push(btn);
+    });
+    this.btnSettingsClose = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + 130, '关闭', 0x95a5a6, 14)
+      .setDepth(11).setVisible(false)
+      .on('pointerdown', () => this.closeSettings());
 
     // 加载随机图片
     this.loadRandomImage();
-
     // 手动驱动游戏循环（Phaser 4 update 有时不触发）
     this.gameLoopTimer = setInterval(() => this.onUpdate(), 16);
 
@@ -321,6 +260,35 @@ class GameScene extends Phaser.Scene {
       .on('pointerdown', () => this.onClearPlates());
   }
 
+  // 卡通风格按钮：圆角胶囊 + 粗描边 + 投影 + 白字黑边
+  makeCartoonButton(x, y, label, fill, fontSize) {
+    const padX = fontSize * 1.2;
+    const w = label.length * fontSize + padX * 2;
+    const h = fontSize + fontSize * 1.3;
+    const r = h / 2;
+    const border = Math.max(3, Math.round(fontSize / 6));
+    const c = this.add.container(x, y);
+    const shadow = this.add.graphics();
+    shadow.fillStyle(0x000000, 0.22);
+    shadow.fillRoundedRect(-w / 2 + 4, -h / 2 + 5, w, h, r);
+    const body = this.add.graphics();
+    body.fillStyle(fill);
+    body.fillRoundedRect(-w / 2, -h / 2, w, h, r);
+    body.lineStyle(border, 0x2c3e50, 1);
+    body.strokeRoundedRect(-w / 2, -h / 2, w, h, r);
+    const t = this.add.text(0, 0, label, {
+      fontSize: fontSize + 'px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
+    }).setOrigin(0.5).setStroke('#2c3e50', Math.max(2, Math.round(fontSize / 10)));
+    c.add([shadow, body, t]);
+    c.setSize(w, h);
+    c.setInteractive({
+      hitArea: new Phaser.Geom.Rectangle(-w / 2, -h / 2, w, h),
+      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+      useHandCursor: true,
+    });
+    return c;
+  }
+
   update() {
     // Phaser 4 的 update 有时不触发，用 timer 事件驱动
   }
@@ -337,7 +305,7 @@ class GameScene extends Phaser.Scene {
         a.flyFrame++;
         if (a.flyFrame > 15) {
           grid[a.originRow][a.originCol] = -1;
-          onCellBecameBlank(a.originRow, a.originCol);
+          markBlankBroadcast(a.originRow, a.originCol);
           movingAnimals.splice(i, 1);
           needsBFS = true;
         }
@@ -385,19 +353,20 @@ class GameScene extends Phaser.Scene {
   renderAnimals() {
     const g = this.animalGfx;
     g.clear();
+    const AS = Math.max(4, Math.round(CELL * 0.75));
     for (const a of movingAnimals) {
       if (a.flying) {
-        const fx = PLATE_COLS[a.targetFood.plateIndex] * CELL - 4;
+        const fx = PLATE_COLS[a.targetFood.plateIndex] * CELL - AS / 2;
         const fy = UI_Y + 10 - a.flyFrame * 20;
         const alpha = 1 - a.flyFrame / 15;
-        const size = Math.max(CELL - a.flyFrame * 1.2, 2);
+        const size = Math.max(AS - a.flyFrame * 1.2, 2);
         g.fillStyle(COLORS[a.color], alpha);
         g.fillRect(fx, fy, size, size);
       } else if (a.path.length > 0) {
-        const px = a.col * CELL + (CELL - 6) / 2;
-        const py = a.row * CELL + (CELL - 6) / 2;
+        const px = a.col * CELL + (CELL - AS) / 2;
+        const py = a.row * CELL + (CELL - AS) / 2;
         g.fillStyle(COLORS[a.color]);
-        g.fillRect(px, py, 6, 6);
+        g.fillRect(px, py, AS, AS);
       }
     }
   }
@@ -430,20 +399,15 @@ class GameScene extends Phaser.Scene {
     for (let qi = 0; qi < 4; qi++) {
       const qx = qi * Q_SPACING + Q_SPACING / 2 - FOOD_SIZE / 2;
       const queue = this.queues[qi];
-      for (let fi = 0; fi < 3; fi++) {
+      for (let fi = 0; fi < 2; fi++) {
         const fy = Q_START_Y + fi * (FOOD_SIZE + 4);
         const label = this.queueLabels[qi][fi];
-        if (fi < 2 && fi < queue.length) {
+        if (fi < queue.length) {
           const food = queue[fi];
           g.fillStyle(COLORS[food.color]);
           g.fillRoundedRect(qx, fy, FOOD_SIZE, FOOD_SIZE, 4);
           label.setVisible(true).setPosition(qx + FOOD_SIZE / 2, fy + FOOD_SIZE / 2);
           label.setText(String(food.capacity));
-        } else if (fi === 2 && queue.length > 2) {
-          g.fillStyle(0xcccccc);
-          g.fillRoundedRect(qx, fy, FOOD_SIZE, FOOD_SIZE, 4);
-          label.setVisible(true).setPosition(qx + FOOD_SIZE / 2, fy + FOOD_SIZE / 2);
-          label.setText('??');
         } else {
           label.setVisible(false);
           if (fi === 0 && queue.length === 0) {
@@ -463,7 +427,7 @@ class GameScene extends Phaser.Scene {
     const Q_SPACING = CANVAS_W / 4;
     const Q_START_Y = UI_Y + 70;
 
-    if (y >= Q_START_Y && y < Q_START_Y + 3 * (FOOD_SIZE + 4)) {
+    if (y >= Q_START_Y && y < Q_START_Y + 2 * (FOOD_SIZE + 4)) {
       for (let qi = 0; qi < 4; qi++) {
         const qx = qi * Q_SPACING + Q_SPACING / 2 - FOOD_SIZE / 2;
         if (x >= qx && x < qx + FOOD_SIZE) {
@@ -481,6 +445,7 @@ class GameScene extends Phaser.Scene {
     if (!food) return;
     food.plateIndex = emptyIdx;
     food.plateCol = PLATE_COLS[emptyIdx];
+    food.seq = foodSeq++;
     food.active = true;
     this.plates[emptyIdx] = food;
     triggerBFS();
@@ -515,7 +480,7 @@ class GameScene extends Phaser.Scene {
     // 6 个盘子都满，且无动物在移动，且无动物可吸引
     const allFull = this.plates.every(p => p !== null);
     if (!allFull || movingAnimals.length > 0) return;
-    const canAttract = this.plates.some(p => colorQueues[p.color].length > 0);
+    const canAttract = this.plates.some(p => plateBFS[p.plateIndex].hasAnimals(p.color));
     if (canAttract) return;
     // 弹出清盘提示
     this.showDialog();
@@ -582,38 +547,55 @@ class GameScene extends Phaser.Scene {
   }
 
   resetGame() {
-    this.loadRandomImage();
+    // 隐藏结算态 UI，恢复游戏按钮
+    this.msgText.setVisible(false);
+    this.btnRestart.setVisible(false);
+    this.btnReshuffle.setVisible(true);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      this.currentImg = img;
+      processImage(img);
+      this.scale.resize(CANVAS_W, CANVAS_H);
+      this.layoutUI();
+      this.initGame();
+      this.drawGrid();
+      this.drawUI();
+      gameRunning = true;
+    };
+    img.onerror = () => {
+      generateGrid();
+      this.initGame();
+      this.drawGrid();
+      this.drawUI();
+      gameRunning = true;
+    };
+    img.src = 'https://picsum.photos/100/100?' + Date.now();
   }
 
   loadRandomImage() {
     this.loadingText.setVisible(true);
     this.btnStart.setVisible(false);
-    this.btnRefresh.setVisible(false);
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
+      this.currentImg = img;
       processImage(img);
-      // 更新按钮位置（画布尺寸已变）
-      this.btnReshuffle.setPosition(CANVAS_W / 2, CANVAS_H - 18);
-      this.btnRestart.setPosition(CANVAS_W / 2, CANVAS_H - 18);
-      this.btnStart.setPosition(CANVAS_W / 2, CANVAS_H / 2);
-      this.btnRefresh.setPosition(CANVAS_W / 2, CANVAS_H / 2 + 50);
-      this.loadingText.setPosition(CANVAS_W / 2, CANVAS_H / 2 - 60);
-      this.msgText.setPosition(CANVAS_W / 2, CANVAS_H / 2);
-      this.dialogOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
-      this.dialogOverlay.setSize(CANVAS_W, CANVAS_H);
-      this.dialogText.setPosition(CANVAS_W / 2, CANVAS_H / 2 - 40);
-      this.dialogConfirm.setPosition(CANVAS_W / 2, CANVAS_H / 2 + 20);
+      this.scale.resize(CANVAS_W, CANVAS_H);
+      this.layoutUI();
       this.initGame();
       this.drawGrid();
       this.drawUI();
       this.loadingText.setVisible(false);
       this.btnStart.setVisible(true);
-      this.btnRefresh.setVisible(true);
     };
     img.onerror = () => {
-      this.loadingText.setText('加载失败，点击重试');
-      this.btnRefresh.setVisible(true);
+      this.loadingText.setText('图片加载失败，使用默认棋盘');
+      this.initGame();
+      this.drawGrid();
+      this.drawUI();
+      this.loadingText.setVisible(false);
+      this.btnStart.setVisible(true);
     };
     img.src = 'https://picsum.photos/100/100?' + Date.now();
   }
@@ -629,14 +611,62 @@ class GameScene extends Phaser.Scene {
     this.victoryTimer = 0;
     this.dialogShown = false;
     movingAnimals.length = 0;
-    initBFS();
+    plateBFS = [];
+    for (let i = 0; i < 6; i++) {
+      plateBFS[i] = new BFS(grid, ROWS, COLS, BLANK_ROWS, COLORS.length, PLATE_COLS[i]);
+    }
+  }
+
+  // 画布尺寸可能已变，重排所有按钮/遮罩/面板位置
+  layoutUI() {
+    this.btnReshuffle.setPosition(CANVAS_W / 2, CANVAS_H - 18);
+    this.btnRestart.setPosition(CANVAS_W / 2, CANVAS_H - 18);
+    this.btnStart.setPosition(CANVAS_W / 2, CANVAS_H / 2);
+    this.loadingText.setPosition(CANVAS_W / 2, CANVAS_H / 2 - 60);
+    this.msgText.setPosition(CANVAS_W / 2, CANVAS_H / 2);
+    this.dialogOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
+    this.dialogOverlay.setSize(CANVAS_W, CANVAS_H);
+    this.dialogText.setPosition(CANVAS_W / 2, CANVAS_H / 2 - 40);
+    this.dialogConfirm.setPosition(CANVAS_W / 2, CANVAS_H / 2 + 20);
+    this.btnSettings.setPosition(CANVAS_W - 50, 30);
+    this.settingsOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
+    this.settingsOverlay.setSize(CANVAS_W, CANVAS_H);
+    this.settingsTitle.setPosition(CANVAS_W / 2, CANVAS_H / 2 - 110);
+    this.sizeButtons.forEach((btn, i) => btn.setPosition(CANVAS_W / 2, CANVAS_H / 2 - 50 + i * 40));
+    this.btnSettingsClose.setPosition(CANVAS_W / 2, CANVAS_H / 2 + 130);
+  }
+
+  openSettings() {
+    this.settingsOverlay.setVisible(true);
+    this.settingsTitle.setVisible(true);
+    this.sizeButtons.forEach(b => b.setVisible(true));
+    this.btnSettingsClose.setVisible(true);
+  }
+
+  closeSettings() {
+    this.settingsOverlay.setVisible(false);
+    this.settingsTitle.setVisible(false);
+    this.sizeButtons.forEach(b => b.setVisible(false));
+    this.btnSettingsClose.setVisible(false);
+  }
+
+  applyBoardSize(n) {
+    BOARD_MAX_DIM = n;
+    this.closeSettings();
+    if (!this.currentImg) return;
+    processImage(this.currentImg);
+    this.scale.resize(CANVAS_W, CANVAS_H);
+    this.layoutUI();
+    this.initGame();
+    this.drawGrid();
+    this.drawUI();
   }
 }
 
 // ============ 图片处理 ============
 function processImage(img) {
-  // 计算棋盘尺寸：最大 100x100，保持比例
-  const maxDim = 100;
+  // 计算棋盘尺寸：最长边不超过 BOARD_MAX_DIM，保持比例
+  const maxDim = BOARD_MAX_DIM;
   let w = img.width, h = img.height;
   if (w > maxDim || h > maxDim) {
     const scale = Math.min(maxDim / w, maxDim / h);
@@ -645,9 +675,14 @@ function processImage(img) {
   }
   COLS = Math.max(1, Math.min(w, maxDim));
   ROWS = Math.max(1, Math.min(h, maxDim));
+  // 格子大小随列数缩放，保持棋盘宽度约 TARGET_W 像素
+  CELL = Math.max(4, Math.round(TARGET_W / COLS));
   CANVAS_W = COLS * CELL;
   CANVAS_H = (ROWS + BLANK_ROWS) * CELL + 240;
   UI_Y = (ROWS + BLANK_ROWS) * CELL;
+  // 6 个盘子沿棋盘宽度均匀分布
+  PLATE_COLS = [];
+  for (let i = 0; i < 6; i++) PLATE_COLS[i] = Math.round(COLS * (i + 0.5) / 6);
 
   // 将图片缩放到棋盘尺寸，提取像素
   const cvs = document.createElement('canvas');
