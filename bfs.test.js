@@ -65,4 +65,18 @@ const t4 = bfs4.take(0, 99);
 const a10 = t4.find(a => a.row === 1 && a.col === 0);
 assert.ok(Math.abs(a10.distance - (2 + Math.SQRT2)) < 1e-9, 'markBlank 后距离应为 2+√2，而非归零的 1');
 
+// --- 平滑路径：视线判定 + 字符串拉紧 ---
+const g5 = [
+  [-1, -1, -1, -1, -1],
+  [-1, -1, -1, -1, -1],
+  [-1, -1, -1, -1, -1],
+  [-1, -1, -1, -1, -1],
+  [-1, -1, -1, -1, -1],
+];
+const bfs5 = new BFS(g5, 5, 5, 1, 2, 2);
+assert.strictEqual(bfs5.lineClear(0, 0, 0, 4), true, '空白网格水平直线应畅通');
+assert.strictEqual(bfs5.lineClear(0, 0, 4, 4), true, '空白网格斜线应畅通');
+const zig = [{ row: 0, col: 0 }, { row: 1, col: 0 }, { row: 2, col: 1 }, { row: 3, col: 2 }, { row: 4, col: 3 }];
+assert.deepStrictEqual(bfs5.smoothPath(zig), [{ row: 0, col: 0 }, { row: 4, col: 3 }], '拉直应只剩首尾两点');
+
 console.log('全部断言通过');

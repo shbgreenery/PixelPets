@@ -146,6 +146,39 @@ class BFS {
     return path;
   }
 
+  // 从 (r0,c0) 到 (r1,c1) 的直线段是否只穿过空白格（不含动物格）
+  lineClear(r0, c0, r1, c1) {
+    const dr = r1 - r0, dc = c1 - c0;
+    const dist = Math.hypot(dr, dc);
+    if (dist < 0.001) return true;
+    const N = Math.max(1, Math.ceil(dist * 2));
+    for (let k = 1; k < N; k++) {
+      const rr = Math.round(r0 + dr * k / N);
+      const cc = Math.round(c0 + dc * k / N);
+      if (rr === r0 && cc === c0) continue;
+      if (rr === r1 && cc === c1) continue;
+      const cell = this.cellAt(rr, cc);
+      if (cell !== null && cell !== -1) return false; // 撞到动物格
+    }
+    return true;
+  }
+
+  // 字符串拉紧：贪心删掉能被直线替换的中间拐点
+  smoothPath(path) {
+    if (path.length <= 2) return path;
+    const out = [path[0]];
+    let i = 0;
+    while (i < path.length - 1) {
+      let j = path.length - 1;
+      while (j > i + 1 && !this.lineClear(path[i].row, path[i].col, path[j].row, path[j].col)) {
+        j--;
+      }
+      out.push(path[j]);
+      i = j;
+    }
+    return out;
+  }
+
   // 从某颜色队列取走至多 n 只仍在场的动物，距离按 dist 实时读取
   take(color, n) {
     const q = this.queues[color];

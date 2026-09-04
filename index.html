@@ -133,15 +133,18 @@ function doBFS() {
     food.attracted += animals.length;
     animals.sort((a, b) => a.distance - b.distance);
     for (const att of animals) {
-      const path = b.tracePath(att.row, att.col);
-      path.shift();
+      const rawPath = b.tracePath(att.row, att.col);
+      rawPath.shift();                        // 去掉动物自身格
+      const path = b.smoothPath(rawPath);     // 字符串拉紧成任意角度直线段
       if (path.length > 0) path[path.length - 1].isFood = true;
       grid[att.row][att.col] = -1;
       markBlankBroadcast(att.row, att.col);
       movingAnimals.push({
         color: food.color, originRow: att.row, originCol: att.col,
-        row: att.row, col: att.col, path: path,
-        speed: 3 + Math.floor(Math.random() * 3), // 3-5 帧/步（约 2 倍速） frame: 0,
+        x: att.col * CELL + CELL / 2,          // 连续像素坐标，起点在动物格中心
+        y: att.row * CELL + CELL / 2,
+        path: path,
+        speed: CELL * 0.5,                     // 像素/帧
         flying: false, flyFrame: 0, targetFood: food,
       });
     }
@@ -312,16 +315,20 @@ class GameScene extends Phaser.Scene {
           movingAnimals.splice(i, 1);
           needsBFS = true;
         }
-      } else {
-        a.frame = (a.frame || 0) + 1;
-        if (a.frame >= a.speed) {
-          a.frame = 0;
-          if (a.path.length > 0) {
-            const next = a.path.shift();
-            a.row = next.row;
-            a.col = next.col;
-            if (next.isFood) this.arriveAtFood(a);
-          }
+      } else if (a.path.length > 0) {
+        // 连续坐标移动：朝下一个路径点直线前进，速度为像素/帧
+        const next = a.path[0];
+        const tx = next.col * CELL + CELL / 2;
+        const ty = next.row * CELL + CELL / 2;
+        const dx = tx - a.x, dy = ty - a.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= a.speed) {
+          a.x = tx; a.y = ty;
+          a.path.shift();
+          if (next.isFood) this.arriveAtFood(a);
+        } else {
+          a.x += dx / dist * a.speed;
+          a.y += dy / dist * a.speed;
         }
       }
     }
@@ -366,8 +373,8 @@ class GameScene extends Phaser.Scene {
         g.fillStyle(COLORS[a.color], alpha);
         g.fillRect(fx, fy, size, size);
       } else if (a.path.length > 0) {
-        const px = a.col * CELL + (CELL - AS) / 2;
-        const py = a.row * CELL + (CELL - AS) / 2;
+        const px = a.x - AS / 2;
+        const py = a.y - AS / 2;
         g.fillStyle(COLORS[a.color]);
         g.fillRect(px, py, AS, AS);
       }
