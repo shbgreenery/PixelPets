@@ -8,6 +8,11 @@
 // 用最小堆做 Dijkstra 松弛——距离默认无穷，发现更小距离就更新 parent 并重新入堆，
 // 而不是「第一次访问就锁死」。
 
+// 8 个方向：上下左右 + 四个对角
+const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+// 移动代价：直走 1，斜走 √2（约 1.414）。斜走更贵，让最短路优先走直线
+const stepCost = (dr, dc) => (dr !== 0 && dc !== 0) ? Math.SQRT2 : 1;
+
 // 最小二叉堆，元素 { row, col, d }，按 d 升序
 class MinHeap {
   constructor() {
@@ -100,10 +105,10 @@ class BFS {
     while (this.heap.size() > 0) {
       const { row, col, d } = this.heap.pop();
       if (this.dist.get(`${row},${col}`) !== d) continue; // 过期堆条目
-      for (const [dr, dc] of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]]) {
+      for (const [dr, dc] of DIRS) {
         const nr = row + dr, nc = col + dc;
         if (this.cellAt(nr, nc) === null) continue;
-        this.relax(nr, nc, d + 1, row, col);
+        this.relax(nr, nc, d + stepCost(dr, dc), row, col);
       }
     }
   }
@@ -111,14 +116,14 @@ class BFS {
   // 某格子变为空白后：重算其到食物的正确距离，并向外重新松弛
   markBlank(row, col) {
     const key = `${row},${col}`;
-    // 新距离 = 所有可穿越邻居（空白格/通道）的最短距离 + 1
+    // 新距离 = 所有可穿越邻居（空白格/通道）的最短距离 + 一步代价
     let bestD = Infinity, bestP = null;
-    for (const [dr, dc] of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]]) {
+    for (const [dr, dc] of DIRS) {
       const nr = row + dr, nc = col + dc;
       if (this.cellAt(nr, nc) !== -1) continue; // 只有空白/通道邻居可穿越
       const nd = this.dist.get(`${nr},${nc}`);
-      if (nd !== undefined && nd + 1 < bestD) {
-        bestD = nd + 1;
+      if (nd !== undefined && nd + stepCost(dr, dc) < bestD) {
+        bestD = nd + stepCost(dr, dc);
         bestP = { row: nr, col: nc };
       }
     }

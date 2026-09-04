@@ -60,9 +60,9 @@ const g3 = [
 const bfs4 = new BFS(g3, ROWS, COLS, BLANK_ROWS, NUM_COLORS, PLATE_COL);
 g3[2][0] = -1;          // 行2 左侧动物离场，格子变空白
 bfs4.markBlank(2, 0);
-// (1,0) 经 (2,0)→通道(3,0)→源点(4,1)，真实最短距离应为 3；旧实现 markBlank 归零会错记为 1
+// (1,0) 经 (2,0)→通道(3,0)→源点(4,1)：两步直走 + 一步斜走，最短距离 = 2 + √2
 const t4 = bfs4.take(0, 99);
 const a10 = t4.find(a => a.row === 1 && a.col === 0);
-assert.strictEqual(a10.distance, 3, 'markBlank 后距离应为真实最短路 3，而非 1');
+assert.ok(Math.abs(a10.distance - (2 + Math.SQRT2)) < 1e-9, 'markBlank 后距离应为 2+√2，而非归零的 1');
 
 console.log('全部断言通过');
