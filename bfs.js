@@ -8,10 +8,9 @@
 // 用最小堆做 Dijkstra 松弛——距离默认无穷，发现更小距离就更新 parent 并重新入堆，
 // 而不是「第一次访问就锁死」。
 
-// 8 个方向：上下左右 + 四个对角
-const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
-// 移动代价：直走 1，斜走 √2（约 1.414）。斜走更贵，让最短路优先走直线
-const stepCost = (dr, dc) => (dr !== 0 && dc !== 0) ? Math.SQRT2 : 1;
+// 连通判定用 4 方向（上下左右）：斜角相邻不算连通。
+// 动物移动路径由 smoothPath / lineClear 拉直，可斜向走，不受此限制。
+const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
 // 最小二叉堆，元素 { row, col, d }，按 d 升序
 class MinHeap {
@@ -108,7 +107,7 @@ class BFS {
       for (const [dr, dc] of DIRS) {
         const nr = row + dr, nc = col + dc;
         if (this.cellAt(nr, nc) === null) continue;
-        this.relax(nr, nc, d + stepCost(dr, dc), row, col);
+        this.relax(nr, nc, d + 1, row, col);
       }
     }
   }
@@ -122,8 +121,8 @@ class BFS {
       const nr = row + dr, nc = col + dc;
       if (this.cellAt(nr, nc) !== -1) continue; // 只有空白/通道邻居可穿越
       const nd = this.dist.get(`${nr},${nc}`);
-      if (nd !== undefined && nd + stepCost(dr, dc) < bestD) {
-        bestD = nd + stepCost(dr, dc);
+      if (nd !== undefined && nd + 1 < bestD) {
+        bestD = nd + 1;
         bestP = { row: nr, col: nc };
       }
     }

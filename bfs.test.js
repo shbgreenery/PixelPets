@@ -31,11 +31,11 @@ assert.deepStrictEqual(path[0], { row: 2, col: 1 }, '路径起点应是动物自
 assert.strictEqual(path[path.length - 1].row, ROWS + BLANK_ROWS, '路径终点应在食物源点行');
 assert.strictEqual(path[path.length - 1].col, PLATE_COL, '路径终点应在盘列');
 
-// --- markBlank：某格变空白后，向上一行继续扩散 ---
+// --- markBlank：某格变空白后，向上一行继续扩散（4 方向，正上方相邻才算连通） ---
 grid[2][1] = -1;               // 行2 中间动物离开，格子变空白
 bfs2.markBlank(2, 1);
-const p2 = bfs2.tracePath(1, 0);
-assert.deepStrictEqual(p2[0], { row: 1, col: 0 }, 'markBlank 后应能回溯到上一行');
+const p2 = bfs2.tracePath(1, 1);
+assert.deepStrictEqual(p2[0], { row: 1, col: 1 }, 'markBlank 后应能回溯到正上方相邻格');
 assert.strictEqual(p2[p2.length - 1].row, ROWS + BLANK_ROWS, 'markBlank 后路径终点仍在源点行');
 
 // --- 回归：动物离场（grid 变 -1）后，take/hasAnimals 不应返回幽灵动物 ---
@@ -60,10 +60,10 @@ const g3 = [
 const bfs4 = new BFS(g3, ROWS, COLS, BLANK_ROWS, NUM_COLORS, PLATE_COL);
 g3[2][0] = -1;          // 行2 左侧动物离场，格子变空白
 bfs4.markBlank(2, 0);
-// (1,0) 经 (2,0)→通道(3,0)→源点(4,1)：两步直走 + 一步斜走，最短距离 = 2 + √2
+// (1,0) 经 (2,0)→通道(3,0)→(3,1)→源点(4,1)，4 方向最短距离 = 4
 const t4 = bfs4.take(0, 99);
 const a10 = t4.find(a => a.row === 1 && a.col === 0);
-assert.ok(Math.abs(a10.distance - (2 + Math.SQRT2)) < 1e-9, 'markBlank 后距离应为 2+√2，而非归零的 1');
+assert.strictEqual(a10.distance, 4, 'markBlank 后距离应为 4（4 方向连通）');
 
 // --- 平滑路径：视线判定 + 字符串拉紧 ---
 const g5 = [
