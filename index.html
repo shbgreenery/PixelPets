@@ -64,27 +64,42 @@ shuffleColors();
 let PLATE_COLS = [8, 24, 40, 56, 72, 88];
 let UI_Y = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL;
 
-// DiceBear 风格列表（每次开局随机选一种）
-const DICEBEAR_STYLES = ['pixel-art', 'pixel-art-neutral', 'shapes', 'shape-grid', 'disco', 'triangles', 'rings'];
-function randomDiceBearUrl() {
-  const style = DICEBEAR_STYLES[Math.floor(Math.random() * DICEBEAR_STYLES.length)];
-  const seed = Math.random().toString(36).slice(2);
-  return 'https://api.dicebear.com/9.x/' + style + '/png?seed=' + seed + '&size=100';
-}
+// Emoji 图案列表（本地渲染，零失败率，每次开局随机选一个）
+const EMOJI_LIST = [
+  '🐱','🐶','🐰','🐼','🦊','🐻','🐸','🐨','🐯','🦁',
+  '🐮','🐷','🐵','🐔','🐧','🦆','🦅','🦉','🐺','🐗',
+  '🐴','🦄','🐝','🦋','🐌','🐞','🐢','🐍','🐙','🐡',
+  '🐠','🐟','🐬','🐳','🦈','🐊','🐆','🦓','🦍','🐘',
+  '🦒','🦙','🦜','🦔','🦦','🦥','🐇','🦩','🦚','🦝',
+  '❤️','🧡','💛','💚','💙','💜','🖤','💝','💖','💕',
+  '⭐','🌟','✨','💫','🎯','🌈','🌙','☀️','🔥',
+  '🌸','🌺','🌻','🌹','🌷','🌼','🍀','🌵','🎄','🌲',
+  '🍎','🍊','🍋','🍇','🍓','🍒','🍑','🍕','🍔','🍩',
+  '🎈','🎉','🎊','🎁','💎','🎵','🎶','🎨','🏆','🧩',
+  '🎲','🔮','💡','🔑','🧸','🤖','👾','🎭','👑','🪄',
+  '👍','👊','🤚','✌️','🤟','👌','🖖','🤞',
+];
 
-// 加载 DiceBear 图片，失败自动重试（最多 retries 次）
-function loadDiceBearImage(onSuccess, onFail, retries) {
+// 在 Canvas 上渲染随机 Emoji 并返回图片
+function loadEmojiImage(onSuccess, onFail) {
+  const emoji = EMOJI_LIST[Math.floor(Math.random() * EMOJI_LIST.length)];
+  const bgIdx = Math.floor(Math.random() * COLORS.length);
+  const bgColor = '#' + COLORS[bgIdx].toString(16).padStart(6, '0');
+  const size = 400;
+  const cvs = document.createElement('canvas');
+  cvs.width = size;
+  cvs.height = size;
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, size, size);
+  ctx.font = '320px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(emoji, size / 2, size / 2 + 10);
   const img = new Image();
-  img.crossOrigin = 'anonymous';
   img.onload = () => onSuccess(img);
-  img.onerror = () => {
-    if (retries > 0) {
-      loadDiceBearImage(onSuccess, onFail, retries - 1);
-    } else {
-      onFail();
-    }
-  };
-  img.src = randomDiceBearUrl();
+  img.onerror = onFail;
+  img.src = cvs.toDataURL();
 }
 
 // ============ 游戏状态 ============
@@ -885,7 +900,7 @@ class GameScene extends Phaser.Scene {
     this.victoryPanel.setVisible(false);
     this.btnRestart.setVisible(false);
     this.btnReshuffle.setVisible(true);
-    loadDiceBearImage(img => {
+    loadEmojiImage(img => {
       this.currentImg = img;
       processImage(img);
       this.scale.resize(CANVAS_W, CANVAS_H);
@@ -900,13 +915,13 @@ class GameScene extends Phaser.Scene {
       this.drawGrid();
       this.drawUI();
       gameRunning = true;
-    }, 3);
+    });
   }
 
   loadRandomImage() {
     this.loadingText.setVisible(true);
     this.btnStart.setVisible(false);
-    loadDiceBearImage(img => {
+    loadEmojiImage(img => {
       this.currentImg = img;
       processImage(img);
       this.scale.resize(CANVAS_W, CANVAS_H);
@@ -923,7 +938,7 @@ class GameScene extends Phaser.Scene {
       this.drawUI();
       this.loadingText.setVisible(false);
       this.btnStart.setVisible(true);
-    }, 3);
+    });
   }
 
   initGame() {
