@@ -36,12 +36,16 @@ const TOP_MARGIN = Math.round(20 * UI_SCALE);
 function plateRadius() { return Math.round(COLS * CELL / 6 * 0.3); }
 
 let COLORS = [
-  0xc0392b, 0xd35400, 0xd4ac0d, 0x1e8449,
-  0x117a65, 0x2471a3, 0x7d3c98, 0x2c3e50,
+  0xd34545, 0xd37a45, 0xd3b045, 0xc2d345,
+  0x8cd345, 0x57d345, 0x45d369, 0x45d39e,
+  0x45d3d3, 0x459ed3, 0x4569d3, 0x5745d3,
+  0x8c45d3, 0xc245d3, 0xd345b0, 0xd3457a,
 ];
 let DARK_COLORS = [
-  0x992e22, 0xa84300, 0xaa8a0a, 0x186a3a,
-  0x0e5e50, 0x1c5a82, 0x642e78, 0x1a2e3a,
+  0xa93737, 0xa96137, 0xa88c37, 0x9ba837,
+  0x70a837, 0x45a837, 0x37a854, 0x37a87e,
+  0x37a8a8, 0x377ea8, 0x3754a8, 0x4537a8,
+  0x7037a8, 0x9b37a8, 0xa8378c, 0xa83761,
 ];
 
 // 随机打乱调色板顺序：主色 COLORS 与深色边框 DARK_COLORS 保持一一对应
@@ -57,6 +61,14 @@ shuffleColors();
 
 let PLATE_COLS = [8, 24, 40, 56, 72, 88];
 let UI_Y = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL;
+
+// DiceBear 风格列表（每次开局随机选一种）
+const DICEBEAR_STYLES = ['pixel-art', 'pixel-art-neutral', 'shapes', 'shape-grid', 'disco', 'triangles', 'rings'];
+function randomDiceBearUrl() {
+  const style = DICEBEAR_STYLES[Math.floor(Math.random() * DICEBEAR_STYLES.length)];
+  const seed = Math.random().toString(36).slice(2);
+  return 'https://api.dicebear.com/9.x/' + style + '/png?seed=' + seed + '&size=100';
+}
 
 // ============ 游戏状态 ============
 let grid = [];
@@ -263,17 +275,20 @@ class GameScene extends Phaser.Scene {
     this.settingsOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.7)
       .setVisible(false).setInteractive().setDepth(10);
     this.settingsPanel = this.add.graphics().setDepth(10.5).setVisible(false);
-    this.settingsTitle = this.add.text(CANVAS_W / 2, CANVAS_H / 2 - Math.round(110 * UI_SCALE), '棋盘大小', {
+    this.settingsTitle = this.add.text(CANVAS_W / 2, CANVAS_H / 2 - Math.round(145 * UI_SCALE), '棋盘大小', {
       fontSize: Math.round(24 * UI_SCALE) + 'px', color: '#333333', fontFamily: 'sans-serif', fontStyle: 'bold',
     }).setOrigin(0.5).setDepth(11).setVisible(false);
     this.sizeButtons = [];
     [20, 30, 50, 100].forEach((n, i) => {
-      const btn = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 - Math.round(50 * UI_SCALE) + i * Math.round(40 * UI_SCALE), n + '×' + n, 0x3498db, 16)
+      const btn = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 - Math.round(100 * UI_SCALE) + i * Math.round(44 * UI_SCALE), n + '×' + n, 0x3498db, 16)
         .setDepth(11).setVisible(false)
         .on('pointerdown', () => this.applyBoardSize(n));
       this.sizeButtons.push(btn);
     });
-    this.btnSettingsClose = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + Math.round(130 * UI_SCALE), '关闭', 0x95a5a6, 14)
+    this.btnRestartFromSettings = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + Math.round(82 * UI_SCALE), '重新开一局', 0x27ae60, 16)
+      .setDepth(11).setVisible(false)
+      .on('pointerdown', () => { this.closeSettings(); this.resetGame(); });
+    this.btnSettingsClose = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + Math.round(126 * UI_SCALE), '关闭', 0x95a5a6, 14)
       .setDepth(11).setVisible(false)
       .on('pointerdown', () => this.closeSettings());
 
@@ -501,11 +516,8 @@ class GameScene extends Phaser.Scene {
     } else {
       ctx.fillStyle = '#' + COLORS[v].toString(16).padStart(6, '0');
       ctx.fillRect(x, y, CELL, CELL);
-      // 顶部高光（提亮）
-      ctx.fillStyle = 'rgba(255,255,255,0.16)';
-      ctx.fillRect(x, y, CELL, Math.max(1, Math.round(CELL * 0.3)));
-      // 动物边框，区分相邻动物
-      ctx.strokeStyle = '#' + DARK_COLORS[v].toString(16).padStart(6, '0');
+      // 极淡格线，辅助辨认格子边界但不破坏图案
+      ctx.strokeStyle = 'rgba(0,0,0,0.06)';
       ctx.lineWidth = 1;
       ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
     }
@@ -621,10 +633,6 @@ class GameScene extends Phaser.Scene {
           label.setText(String(food.capacity));
         } else {
           label.setVisible(false);
-          if (fi === 0 && queue.length === 0) {
-            g.lineStyle(1, 0x999999);
-            g.strokeRoundedRect(qx, fy, FOOD_SIZE, FOOD_SIZE, 4);
-          }
         }
       }
     }
@@ -833,7 +841,7 @@ class GameScene extends Phaser.Scene {
       this.drawUI();
       gameRunning = true;
     };
-    img.src = 'https://picsum.photos/100/100?' + Date.now();
+    img.src = randomDiceBearUrl();
   }
 
   loadRandomImage() {
@@ -860,7 +868,7 @@ class GameScene extends Phaser.Scene {
       this.loadingText.setVisible(false);
       this.btnStart.setVisible(true);
     };
-    img.src = 'https://picsum.photos/100/100?' + Date.now();
+    img.src = randomDiceBearUrl();
   }
 
   initGame() {
@@ -902,18 +910,20 @@ class GameScene extends Phaser.Scene {
     this.btnSettings.setPosition(Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
     this.settingsOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
     this.settingsOverlay.setSize(CANVAS_W, CANVAS_H);
-    this.settingsTitle.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(110 * UI_SCALE));
-    this.sizeButtons.forEach((btn, i) => btn.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(50 * UI_SCALE) + i * Math.round(40 * UI_SCALE)));
-    this.btnSettingsClose.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(130 * UI_SCALE));
+    this.settingsTitle.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(145 * UI_SCALE));
+    this.sizeButtons.forEach((btn, i) => btn.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(100 * UI_SCALE) + i * Math.round(44 * UI_SCALE)));
+    this.btnRestartFromSettings.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(82 * UI_SCALE));
+    this.btnSettingsClose.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(126 * UI_SCALE));
     this.layoutWoodBorder();
   }
 
   openSettings() {
     this.settingsOverlay.setVisible(true);
-    this.drawPanel(this.settingsPanel, Math.round(240 * UI_SCALE), Math.round(320 * UI_SCALE));
+    this.drawPanel(this.settingsPanel, Math.round(240 * UI_SCALE), Math.round(360 * UI_SCALE));
     this.settingsPanel.setVisible(true);
     this.settingsTitle.setVisible(true);
     this.sizeButtons.forEach(b => b.setVisible(true));
+    this.btnRestartFromSettings.setVisible(true);
     this.btnSettingsClose.setVisible(true);
   }
 
@@ -922,6 +932,7 @@ class GameScene extends Phaser.Scene {
     this.settingsPanel.setVisible(false);
     this.settingsTitle.setVisible(false);
     this.sizeButtons.forEach(b => b.setVisible(false));
+    this.btnRestartFromSettings.setVisible(false);
     this.btnSettingsClose.setVisible(false);
   }
 
