@@ -113,6 +113,7 @@ let gameRunning = false;
 let foodSeq = 0;
 let remainingAnimals = 0;   // 剩余未消除动物数（供 checkGameOver 使用，避免每帧全网格扫描）
 let dirtyCells = [];        // 动物离场后需重绘为空白格的格子
+let speedMultiplier = 1;    // 移动速度倍率（1x / 2x）
 
 // ============ 棋盘生成 ============
 function generateGrid() {
@@ -276,6 +277,35 @@ class GameScene extends Phaser.Scene {
       .setDepth(4)
       .on('pointerdown', () => this.resetGame())
       .setVisible(false);
+
+    // 2 倍速开关（底部右侧）
+    this.btnSpeed = this.add.container(CANVAS_W - Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
+    this.speedBg = this.add.graphics();
+    this.speedLabel = this.add.text(0, 0, '1x', {
+      fontSize: Math.round(16 * UI_SCALE) + 'px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
+    }).setOrigin(0.5).setStroke('#2c3e50', Math.max(2, Math.round(UI_SCALE / 3)));
+    const r = Math.round(18 * UI_SCALE);
+    const size = Math.round(r * 2.7);
+    this.speedBg.fillStyle(0x3498db);
+    this.speedBg.fillCircle(0, 0, r);
+    this.speedBg.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), 0x2c3e50, 1);
+    this.speedBg.strokeCircle(0, 0, r);
+    this.btnSpeed.add([this.speedBg, this.speedLabel]);
+    this.btnSpeed.setSize(size, size);
+    this.btnSpeed.setInteractive({
+      hitArea: new Phaser.Geom.Rectangle(0, 0, size, size),
+      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+      useHandCursor: true,
+    });
+    this.btnSpeed.on('pointerdown', () => {
+      speedMultiplier = speedMultiplier === 1 ? 2 : 1;
+      this.speedLabel.setText(speedMultiplier + 'x');
+      this.speedBg.clear();
+      this.speedBg.fillStyle(speedMultiplier === 2 ? 0xe94560 : 0x3498db);
+      this.speedBg.fillCircle(0, 0, r);
+      this.speedBg.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), 0x2c3e50, 1);
+      this.speedBg.strokeCircle(0, 0, r);
+    });
 
     // 启动
     this.gameInited = false;
@@ -523,7 +553,7 @@ class GameScene extends Phaser.Scene {
         const ty = TOP_MARGIN + next.row * CELL + CELL / 2;
         const dx = tx - a.x, dy = ty - a.y;
         const dist = Math.hypot(dx, dy);
-        const step = a.speed * dt;
+        const step = a.speed * dt * speedMultiplier;
         if (dist <= step) {
           a.x = tx; a.y = ty;
           a.path.shift();
@@ -979,6 +1009,7 @@ class GameScene extends Phaser.Scene {
     this.victoryOverlay.setSize(CANVAS_W, CANVAS_H);
     this.btnSettings.setPosition(Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
     this.btnRestartIcon.setPosition(Math.round(110 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
+    this.btnSpeed.setPosition(CANVAS_W - Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
     this.settingsOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
     this.settingsOverlay.setSize(CANVAS_W, CANVAS_H);
     this.settingsTitle.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(145 * UI_SCALE));
