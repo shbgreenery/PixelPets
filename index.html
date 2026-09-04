@@ -30,8 +30,8 @@ let CANVAS_H = 1080;
 const UI_SCALE = (typeof window !== 'undefined' && 'ontouchstart' in window) ? 1.5 : 1;
 // 棋盘左右边距（像素）
 const BOARD_MARGIN = Math.round(20 * UI_SCALE);
-// 棋盘顶部边距（给设置按钮留空间）
-const TOP_MARGIN = Math.round(70 * UI_SCALE);
+// 棋盘顶部边距（仅留少量呼吸空间，设置按钮已移到左下角）
+const TOP_MARGIN = Math.round(20 * UI_SCALE);
 // 盘子半径（直径占槽位 60%，圆形盘子）
 function plateRadius() { return Math.round(COLS * CELL / 6 * 0.3); }
 
@@ -67,6 +67,8 @@ let queues, plates;
 let bfsPending = false;
 let gameRunning = false;
 let foodSeq = 0;
+let remainingAnimals = 0;   // 剩余未消除动物数（供 checkGameOver 使用，避免每帧全网格扫描）
+let dirtyCells = [];        // 动物离场后需重绘为空白格的格子
 
 // ============ 棋盘生成 ============
 function generateGrid() {
@@ -157,13 +159,15 @@ function doBFS() {
       const path = b.smoothPath(rawPath);     // 字符串拉紧成任意角度直线段
       if (path.length > 0) path[path.length - 1].isFood = true;
       grid[att.row][att.col] = -1;
+      remainingAnimals--;
+      dirtyCells.push({ row: att.row, col: att.col });
       markBlankBroadcast(att.row, att.col);
       movingAnimals.push({
         color: food.color, originRow: att.row, originCol: att.col,
         x: BOARD_MARGIN + att.col * CELL + CELL / 2,          // 连续像素坐标，起点在动物格中心
         y: TOP_MARGIN + att.row * CELL + CELL / 2,
         path: path,
-        speed: CELL * 0.5,                     // 像素/帧
+        speed: TARGET_W / 30 * 0.5,           // 屏幕绝对速度（像素/基准帧），不随棋盘大小变化
         targetFood: food,
       });
     }
@@ -179,7 +183,9 @@ class GameScene extends Phaser.Scene {
 
   create() {
     // 创建图形层
-    this.gridGfx = this.add.graphics();
+    // 棋盘烘焙到离屏纹理（boardImg），动物层与 UI 层仍用 Graphics 逐帧绘制
+    this.boardImg = null;
+    this.boardTex = null;
     this.animalGfx = this.add.graphics();
     this.uiGfx = this.add.graphics();
     // 木纹边框（4 条 tileSprite，置于棋盘之下）
@@ -249,7 +255,7 @@ class GameScene extends Phaser.Scene {
       });
 
     // 设置按钮（齿轮图标，常驻顶部条右上角）
-    this.btnSettings = this.makeGearButton(CANVAS_W - 50, Math.round(26 * UI_SCALE), Math.round(18 * UI_SCALE), 0x3498db)
+    this.btnSettings = this.makeGearButton(Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE), Math.round(18 * UI_SCALE), 0x3498db)
       .setDepth(1)
       .on('pointerdown', () => this.openSettings());
 
@@ -273,8 +279,6 @@ class GameScene extends Phaser.Scene {
 
     // 加载随机图片
     this.loadRandomImage();
-    // 手动驱动游戏循环（Phaser 4 update 有时不触发）
-    this.gameLoopTimer = setInterval(() => this.onUpdate(), 16);
 
     // 清盘提示对话框（初始隐藏）
     this.dialogOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.7)
@@ -400,11 +404,14 @@ class GameScene extends Phaser.Scene {
     );
   }
 
-  update() {
-    // Phaser 4 的 update 有时不触发，用 timer 事件驱动
+  update(time, delta) {
+    // 使用 Phaser 原生帧循环，delta 为距上一帧的毫秒数
+    this.onUpdate(delta);
   }
 
-  onUpdate() {
+  onUpdate(delta) {
+    // 归一化到 16.67ms（约 60fps）基准，使移动速度与帧率无关
+    const dt = (delta || 16.67) / 16.67;
     window.__UPDATE_COUNT = (window.__UPDATE_COUNT || 0) + 1;
     if (!gameRunning || !this.gameInited) return;
 
@@ -423,20 +430,21 @@ class GameScene extends Phaser.Scene {
         const ty = TOP_MARGIN + next.row * CELL + CELL / 2;
         const dx = tx - a.x, dy = ty - a.y;
         const dist = Math.hypot(dx, dy);
-        if (dist <= a.speed) {
+        const step = a.speed * dt;
+        if (dist <= step) {
           a.x = tx; a.y = ty;
           a.path.shift();
           if (next.isFood) this.arriveAtFood(a);
         } else {
-          a.x += dx / dist * a.speed;
-          a.y += dy / dist * a.speed;
+          a.x += dx / dist * step;
+          a.y += dy / dist * step;
         }
       }
     }
     // 飞行中的食物：从队列槽位直线飞到盘子
     for (let i = flyingFoods.length - 1; i >= 0; i--) {
       const food = flyingFoods[i];
-      food.t += 0.08;
+      food.t += 0.08 * dt;
       if (food.t >= 1) {
         food.t = 1;
         food.flying = false;
@@ -451,7 +459,12 @@ class GameScene extends Phaser.Scene {
       }
     }
     if (needsBFS) triggerBFS();
-    this.drawGrid();
+    // 只重绘本帧离场的格子（脏格），棋盘其余部分复用离屏纹理
+    if (dirtyCells.length > 0) {
+      for (const d of dirtyCells) this.paintBlankCell(d.row, d.col);
+      this.boardTex.refresh();   // 批量重绘后一次性刷新纹理
+      dirtyCells.length = 0;
+    }
     this.renderAnimals();
     this.drawUI();
     // 检查是否所有盘子满了且无动物可吸引
@@ -460,30 +473,50 @@ class GameScene extends Phaser.Scene {
   }
 
   // ============ 绘制 ============
+  // 将静态棋盘一次性烘焙到离屏 Canvas 纹理（boardTex），由 boardImg 展示。
+  // 动物离场时只重绘对应单格，避免每帧 clear + 全量 fillRect。
   drawGrid() {
-    const g = this.gridGfx;
-    g.clear();
-    // 棋盘
+    if (this.boardImg) { this.boardImg.destroy(); this.boardImg = null; }
+    if (this.boardTex) { this.boardTex.destroy(); this.boardTex = null; }
+
+    const bw = COLS * CELL, bh = ROWS * CELL;
+    this.boardTex = this.textures.createCanvas('board', bw, bh);
+    const ctx = this.boardTex.context;
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
-        const v = grid[r][c];
-        const x = BOARD_MARGIN + c * CELL;
-        const y = TOP_MARGIN + r * CELL;
-        if (v === -1) {
-          g.fillStyle(0xe8e8e8);
-          g.fillRect(x, y, CELL, CELL);
-        } else {
-          g.fillStyle(COLORS[v]);
-          g.fillRect(x, y, CELL, CELL);
-          // 顶部高光（提亮）
-          g.fillStyle(0xffffff, 0.16);
-          g.fillRect(x, y, CELL, Math.max(1, Math.round(CELL * 0.3)));
-          // 动物边框，区分相邻动物
-          g.lineStyle(1, DARK_COLORS[v], 1);
-          g.strokeRect(x, y, CELL, CELL);
-        }
+        this.paintCell(ctx, r, c);
       }
     }
+    this.boardTex.refresh();
+    this.boardImg = this.add.image(BOARD_MARGIN, TOP_MARGIN, 'board').setOrigin(0, 0).setDepth(-0.5);
+  }
+
+  // 在指定 2d 上下文上绘制单格（纹理坐标，无棋盘边距）
+  paintCell(ctx, r, c) {
+    const v = grid[r][c];
+    const x = c * CELL, y = r * CELL;
+    if (v === -1) {
+      ctx.fillStyle = '#e8e8e8';
+      ctx.fillRect(x, y, CELL, CELL);
+    } else {
+      ctx.fillStyle = '#' + COLORS[v].toString(16).padStart(6, '0');
+      ctx.fillRect(x, y, CELL, CELL);
+      // 顶部高光（提亮）
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      ctx.fillRect(x, y, CELL, Math.max(1, Math.round(CELL * 0.3)));
+      // 动物边框，区分相邻动物
+      ctx.strokeStyle = '#' + DARK_COLORS[v].toString(16).padStart(6, '0');
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
+    }
+  }
+
+  // 动物离场后把单格重绘为空白（仅写入离屏上下文，不单独刷新纹理）
+  paintBlankCell(r, c) {
+    if (!this.boardTex) return;
+    const ctx = this.boardTex.context;
+    ctx.fillStyle = '#e8e8e8';
+    ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
   }
 
   // 生成木纹纹理（只生成一次）
@@ -753,10 +786,7 @@ class GameScene extends Phaser.Scene {
   checkGameOver() {
     const allQueuesEmpty = this.queues.every(q => q.length === 0);
     const allPlatesEmpty = this.plates.every(p => p === null);
-    let hasAnimals = false;
-    for (let r = 0; r < ROWS && !hasAnimals; r++)
-      for (let c = 0; c < COLS && !hasAnimals; c++)
-        if (grid[r][c] >= 0) hasAnimals = true;
+    const hasAnimals = remainingAnimals > 0;
 
     if (allQueuesEmpty && allPlatesEmpty && !hasAnimals && movingAnimals.length === 0) {
       this.msgText.setText('胜利! 所有动物都吃饱了!').setVisible(true);
@@ -844,6 +874,8 @@ class GameScene extends Phaser.Scene {
     this.dialogShown = false;
     movingAnimals.length = 0;
     flyingFoods.length = 0;
+    remainingAnimals = ROWS * COLS;
+    dirtyCells.length = 0;
     plateBFS = [];
     for (let i = 0; i < 6; i++) {
       plateBFS[i] = new BFS(grid, ROWS, COLS, BLANK_ROWS, COLORS.length, PLATE_COLS[i]);
@@ -867,7 +899,7 @@ class GameScene extends Phaser.Scene {
     this.dialogConfirm.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(42 * UI_SCALE));
     this.victoryOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
     this.victoryOverlay.setSize(CANVAS_W, CANVAS_H);
-    this.btnSettings.setPosition(CANVAS_W - 50, Math.round(26 * UI_SCALE));
+    this.btnSettings.setPosition(Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
     this.settingsOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
     this.settingsOverlay.setSize(CANVAS_W, CANVAS_H);
     this.settingsTitle.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(110 * UI_SCALE));
