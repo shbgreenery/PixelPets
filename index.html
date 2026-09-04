@@ -24,6 +24,8 @@ let CELL = 8;
 const BLANK_ROWS = 2;
 const TARGET_W = 800;      // 棋盘目标宽度（像素），格子大小按此缩放
 let BOARD_MAX_DIM = 30;    // 棋盘尺寸上限（最长边）
+const saved = localStorage.getItem('boardSize');
+if (saved) BOARD_MAX_DIM = parseInt(saved, 10);
 let CANVAS_W = 800;
 let CANVAS_H = 1080;
 // 移动端（触摸设备）UI 放大倍数，桌面端为 1
@@ -68,6 +70,21 @@ function randomDiceBearUrl() {
   const style = DICEBEAR_STYLES[Math.floor(Math.random() * DICEBEAR_STYLES.length)];
   const seed = Math.random().toString(36).slice(2);
   return 'https://api.dicebear.com/9.x/' + style + '/png?seed=' + seed + '&size=100';
+}
+
+// 加载 DiceBear 图片，失败自动重试（最多 retries 次）
+function loadDiceBearImage(onSuccess, onFail, retries) {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => onSuccess(img);
+  img.onerror = () => {
+    if (retries > 0) {
+      loadDiceBearImage(onSuccess, onFail, retries - 1);
+    } else {
+      onFail();
+    }
+  };
+  img.src = randomDiceBearUrl();
 }
 
 // ============ 游戏状态 ============
@@ -266,10 +283,14 @@ class GameScene extends Phaser.Scene {
         gameRunning = true;
       });
 
-    // 设置按钮（齿轮图标，常驻顶部条右上角）
+    // 设置按钮（齿轮图标，常驻左下角）
     this.btnSettings = this.makeGearButton(Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE), Math.round(18 * UI_SCALE), 0x3498db)
       .setDepth(1)
       .on('pointerdown', () => this.openSettings());
+    // 重启图标按钮（↻，常驻设置齿轮右边）
+    this.btnRestartIcon = this.makeRestartButton(Math.round(110 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE), Math.round(18 * UI_SCALE), 0x27ae60)
+      .setDepth(1)
+      .on('pointerdown', () => { this.closeSettings(); this.resetGame(); });
 
     // 设置面板
     this.settingsOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.7)
@@ -285,9 +306,6 @@ class GameScene extends Phaser.Scene {
         .on('pointerdown', () => this.applyBoardSize(n));
       this.sizeButtons.push(btn);
     });
-    this.btnRestartFromSettings = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + Math.round(82 * UI_SCALE), '重新开一局', 0x27ae60, 16)
-      .setDepth(11).setVisible(false)
-      .on('pointerdown', () => { this.closeSettings(); this.resetGame(); });
     this.btnSettingsClose = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + Math.round(126 * UI_SCALE), '关闭', 0x95a5a6, 14)
       .setDepth(11).setVisible(false)
       .on('pointerdown', () => this.closeSettings());
@@ -375,7 +393,7 @@ class GameScene extends Phaser.Scene {
     return c;
   }
 
-  // 洗牌图标按钮：圆底 + 两条交叉白色箭头
+  // 洗牌图标按钮：圆底 + 标准上下交错箭头（↨ 风格）
   makeShuffleButton(x, y, r, fill) {
     const size = Math.round(r * 2.7);
     const c = this.add.container(x, y);
@@ -387,13 +405,58 @@ class GameScene extends Phaser.Scene {
     body.fillCircle(0, 0, r);
     body.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), 0x2c3e50, 1);
     body.strokeCircle(0, 0, r);
-    const d = r * 0.55;
     const lw = Math.max(3, Math.round(3 * UI_SCALE));
-    const head = r * 0.42;
-    // 箭头 1：左下 → 右上
-    this.drawArrow(body, -d, d, d, -d, lw, head);
-    // 箭头 2：左上 → 右下
-    this.drawArrow(body, -d, -d, d, d, lw, head);
+    const head = r * 0.35;
+    const gap = r * 0.15;
+    const len = r * 0.5;
+    // 上箭头：向右
+    this.drawArrow(body, -len, -gap, len, -gap, lw, head);
+    // 下箭头：向左
+    this.drawArrow(body, len, gap, -len, gap, lw, head);
+    c.add([shadow, body]);
+    c.setSize(size, size);
+    c.setInteractive({
+      hitArea: new Phaser.Geom.Rectangle(0, 0, size, size),
+      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+      useHandCursor: true,
+    });
+    return c;
+  }
+
+  // 重启图标按钮：圆底 + 白色环形箭头（↻）
+  makeRestartButton(x, y, r, fill) {
+    const size = Math.round(r * 2.7);
+    const c = this.add.container(x, y);
+    const shadow = this.add.graphics();
+    shadow.fillStyle(0x000000, 0.22);
+    shadow.fillCircle(4, 5, r * 1.35);
+    const body = this.add.graphics();
+    body.fillStyle(fill);
+    body.fillCircle(0, 0, r);
+    body.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), 0x2c3e50, 1);
+    body.strokeCircle(0, 0, r);
+    // 白色环形箭头（3/4 圆弧 + 箭头三角）
+    const lw = Math.max(2, Math.round(2 * UI_SCALE));
+    const rr = r * 0.55;
+    body.lineStyle(lw, 0xffffff, 0.9);
+    const steps = 16;
+    const arcSteps = 12;
+    for (let i = 0; i < arcSteps; i++) {
+      const a1 = (i / steps) * Math.PI * 2 - Math.PI / 2;
+      const a2 = ((i + 1) / steps) * Math.PI * 2 - Math.PI / 2;
+      body.lineBetween(Math.cos(a1) * rr, Math.sin(a1) * rr, Math.cos(a2) * rr, Math.sin(a2) * rr);
+    }
+    const endAngle = (arcSteps / steps) * Math.PI * 2 - Math.PI / 2;
+    const ex = Math.cos(endAngle) * rr;
+    const ey = Math.sin(endAngle) * rr;
+    const tangent = endAngle + Math.PI / 2;
+    const head = r * 0.25;
+    body.fillStyle(0xffffff);
+    body.fillTriangle(
+      ex, ey,
+      ex + Math.cos(tangent + 0.6) * head, ey + Math.sin(tangent + 0.6) * head,
+      ex + Math.cos(tangent - 0.6) * head, ey + Math.sin(tangent - 0.6) * head
+    );
     c.add([shadow, body]);
     c.setSize(size, size);
     c.setInteractive({
@@ -822,9 +885,7 @@ class GameScene extends Phaser.Scene {
     this.victoryPanel.setVisible(false);
     this.btnRestart.setVisible(false);
     this.btnReshuffle.setVisible(true);
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
+    loadDiceBearImage(img => {
       this.currentImg = img;
       processImage(img);
       this.scale.resize(CANVAS_W, CANVAS_H);
@@ -833,23 +894,19 @@ class GameScene extends Phaser.Scene {
       this.drawGrid();
       this.drawUI();
       gameRunning = true;
-    };
-    img.onerror = () => {
+    }, () => {
       generateGrid();
       this.initGame();
       this.drawGrid();
       this.drawUI();
       gameRunning = true;
-    };
-    img.src = randomDiceBearUrl();
+    }, 3);
   }
 
   loadRandomImage() {
     this.loadingText.setVisible(true);
     this.btnStart.setVisible(false);
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
+    loadDiceBearImage(img => {
       this.currentImg = img;
       processImage(img);
       this.scale.resize(CANVAS_W, CANVAS_H);
@@ -859,16 +916,14 @@ class GameScene extends Phaser.Scene {
       this.drawUI();
       this.loadingText.setVisible(false);
       this.btnStart.setVisible(true);
-    };
-    img.onerror = () => {
+    }, () => {
       this.loadingText.setText('图片加载失败，使用默认棋盘');
       this.initGame();
       this.drawGrid();
       this.drawUI();
       this.loadingText.setVisible(false);
       this.btnStart.setVisible(true);
-    };
-    img.src = randomDiceBearUrl();
+    }, 3);
   }
 
   initGame() {
@@ -908,11 +963,11 @@ class GameScene extends Phaser.Scene {
     this.victoryOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
     this.victoryOverlay.setSize(CANVAS_W, CANVAS_H);
     this.btnSettings.setPosition(Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
+    this.btnRestartIcon.setPosition(Math.round(110 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
     this.settingsOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
     this.settingsOverlay.setSize(CANVAS_W, CANVAS_H);
     this.settingsTitle.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(145 * UI_SCALE));
     this.sizeButtons.forEach((btn, i) => btn.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(100 * UI_SCALE) + i * Math.round(44 * UI_SCALE)));
-    this.btnRestartFromSettings.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(82 * UI_SCALE));
     this.btnSettingsClose.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(126 * UI_SCALE));
     this.layoutWoodBorder();
   }
@@ -923,7 +978,6 @@ class GameScene extends Phaser.Scene {
     this.settingsPanel.setVisible(true);
     this.settingsTitle.setVisible(true);
     this.sizeButtons.forEach(b => b.setVisible(true));
-    this.btnRestartFromSettings.setVisible(true);
     this.btnSettingsClose.setVisible(true);
   }
 
@@ -932,12 +986,12 @@ class GameScene extends Phaser.Scene {
     this.settingsPanel.setVisible(false);
     this.settingsTitle.setVisible(false);
     this.sizeButtons.forEach(b => b.setVisible(false));
-    this.btnRestartFromSettings.setVisible(false);
     this.btnSettingsClose.setVisible(false);
   }
 
   applyBoardSize(n) {
     BOARD_MAX_DIM = n;
+    localStorage.setItem('boardSize', String(n));
     this.closeSettings();
     if (!this.currentImg) return;
     processImage(this.currentImg);
