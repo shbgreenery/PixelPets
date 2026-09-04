@@ -21,7 +21,7 @@ canvas { display: block; max-width: 100vw; max-height: 100vh; }
 // ============ 配置（初始值，启动后由图片决定） ============
 let COLS = 30, ROWS = 30;
 let CELL = 8;
-const BLANK_ROWS = 5;
+const BLANK_ROWS = 2;
 const TARGET_W = 800;      // 棋盘目标宽度（像素），格子大小按此缩放
 let BOARD_MAX_DIM = 30;    // 棋盘尺寸上限（最长边）
 let CANVAS_W = 800;
@@ -453,7 +453,7 @@ class GameScene extends Phaser.Scene {
         triggerBFS();
       } else {
         const cx = BOARD_MARGIN + PLATE_COLS[food.plateIndex] * CELL;
-        const cy = UI_Y + 10 + plateRadius();
+        const cy = UI_Y + 6 + plateRadius();
         food.fx = food.fromX + (cx - food.fromX) * food.t;
         food.fy = food.fromY + (cy - food.fromY) * food.t;
       }
@@ -577,12 +577,12 @@ class GameScene extends Phaser.Scene {
     const FOOD_SIZE = Math.round(56 * UI_SCALE);
     const PLATE_R = plateRadius();
     const Q_SPACING = (CANVAS_W - 2 * BOARD_MARGIN) / 4;
-    const Q_START_Y = UI_Y + 10 + 2 * PLATE_R + Math.round(20 * UI_SCALE);
+    const Q_START_Y = UI_Y + 6 + 2 * PLATE_R + Math.round(12 * UI_SCALE);
 
     // 盘子（圆形，带盘沿）
     for (let i = 0; i < 6; i++) {
       const cx = BOARD_MARGIN + PLATE_COLS[i] * CELL;
-      const cy = UI_Y + 10 + PLATE_R;
+      const cy = UI_Y + 6 + PLATE_R;
       const food = this.plates[i];
       if (food && !food.flying) {
         this.foodLabels[i].setVisible(true);
@@ -639,7 +639,7 @@ class GameScene extends Phaser.Scene {
     const FOOD_SIZE = Math.round(56 * UI_SCALE);
     const Q_SPACING = (CANVAS_W - 2 * BOARD_MARGIN) / 4;
     const PLATE_R = plateRadius();
-    const Q_START_Y = UI_Y + 10 + 2 * PLATE_R + Math.round(20 * UI_SCALE);
+    const Q_START_Y = UI_Y + 6 + 2 * PLATE_R + Math.round(12 * UI_SCALE);
 
     if (y >= Q_START_Y && y < Q_START_Y + 2 * (FOOD_SIZE + 4)) {
       for (let qi = 0; qi < 4; qi++) {
@@ -664,7 +664,7 @@ class GameScene extends Phaser.Scene {
     food.flying = true;
     const FOOD_SIZE = Math.round(56 * UI_SCALE);
     const Q_SPACING = (CANVAS_W - 2 * BOARD_MARGIN) / 4;
-    const Q_START_Y = UI_Y + 10 + 2 * plateRadius() + Math.round(20 * UI_SCALE);
+    const Q_START_Y = UI_Y + 6 + 2 * plateRadius() + Math.round(12 * UI_SCALE);
     food.fromX = BOARD_MARGIN + qi * Q_SPACING + Q_SPACING / 2;
     food.fromY = Q_START_Y + FOOD_SIZE / 2;
     food.fx = food.fromX;
@@ -953,7 +953,7 @@ function processImage(img) {
   // 格子大小随列数缩放，保持棋盘宽度约 TARGET_W 像素
   CELL = Math.max(4, Math.round(TARGET_W / COLS));
   CANVAS_W = COLS * CELL + 2 * BOARD_MARGIN;
-  CANVAS_H = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL + Math.round(300 * UI_SCALE);
+  CANVAS_H = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL + Math.round(290 * UI_SCALE);
   UI_Y = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL;
   // 6 个盘子沿棋盘宽度均匀分布
   PLATE_COLS = [];
