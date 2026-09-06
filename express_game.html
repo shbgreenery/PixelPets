@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>快递哪去了？- 异步稳定版</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <style>
+        body { margin: 0; background-color: #2c3e50; display: flex; flex-direction: column; align-items: center; font-family: 'Microsoft YaHei', sans-serif; user-select: none; padding-top: 20px; }
+        .game-title { color: #f39c12; font-size: 36px; font-weight: 900; margin: 0 0 15px 0; text-shadow: 2px 2px 0px #d35400, 4px 4px 0px #000; letter-spacing: 4px; }
+        #game-info { width: 520px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 15px; background: #ecf0f1; border-radius: 8px; border: 4px solid #5d4037; box-sizing: border-box; }
+        .rule-item { font-size: 13px; color: #333; line-height: 1.5; border-left: 4px solid #d35400; padding-left: 8px; display: flex; align-items: center; }
+        #game-container { margin-top: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); cursor: crosshair; position: relative; width: 520px; height: 620px; background: #34495e; }
+        
+        /* 改进的 Loading 样式 */
+        #loading-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; display: none; border: 4px solid #5d4037; box-sizing: border-box; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #f39c12; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #attempt-count { margin-top: 10px; font-size: 12px; color: #95a5a6; }
+    </style>
+</head>
+<body>
+
+<h1 class="game-title">快递哪去了？</h1>
+
+<div id="game-info">
+    <div class="rule-item">每行，每列<br>有且仅有一个快递</div>
+    <div class="rule-item">每种颜色<br>有且仅有一个快递</div>
+    <div class="rule-item">快递与快递之间<br>互不相邻</div>
+</div>
+
+<div id="game-container">
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div id="loading-text">正在规划快递路线...</div>
+        <div id="attempt-count">正在尝试第 1 次生成</div>
+    </div>
+</div>
+
+<script>
+/**
+ * 核心算法类：采用异步迭代防止浏览器卡死
+ */
+class LevelGenerator {
+    // 基础检查：行列和相邻
+    static isPosSafe(r, c, board) {
+        for (let prevR = 0; prevR < r; prevR++) {
+            let prevC = board[prevR];
+            if (prevC === c) return false;
+            if (Math.abs(prevR - r) <= 1 && Math.abs(prevC - c) <= 1) return false;
+        }
+        return true;
+    }
+
+    // 随机寻找星星点
+    static findValidStars(size) {
+        let board = Array(size).fill(-1);
+        const solve = (row) => {
+            if (row === size) return true;
+            let cols = [...Array(size).keys()].sort(() => Math.random() - 0.5);
+            for (let col of cols) {
+                if (this.isPosSafe(row, col, board)) {
+                    board[row] = col;
+                    if (solve(row + 1)) return true;
+                    board[row] = -1;
+                }
+            }
+            return false;
+        };
+        solve(0);
+        return board.map((col, row) => [row, col]);
+    }
+
+    // 扩张区域
+    static generateRegions(size, stars) {
+        let grid = Array.from({ length: size }, () => Array(size).fill(-1));
+        let frontiers = stars.map((pos, idx) => {
+            grid[pos[0]][pos[1]] = idx;
+            return [pos];
+        });
+        let filled = size;
+        while (filled < size * size) {
+            let id = Math.floor(Math.random() * size);
+            let frontier = frontiers[id];
+            if (frontier.length === 0) continue;
+            let idx = Math.floor(Math.random() * frontier.length);
+            let [r, c] = frontier[idx];
+            let neighbors = [[r-1, c], [r+1, c], [r, c-1], [r, c+1]].filter(([nr, nc]) => 
+                nr >= 0 && nr < size && nc >= 0 && nc < size && grid[nr][nc] === -1
+            );
+            if (neighbors.length > 0) {
+                let [nr, nc] = neighbors[Math.floor(Math.random() * neighbors.length)];
+                grid[nr][nc] = id;
+                frontier.push([nr, nc]);
+                filled++;
+            } else frontier.splice(idx, 1);
+        }
+        return grid;
+    }
+
+    // 唯一解求解器（带剪枝）
+    static countSolutions(mapLayout, size) {
+        let solutions = 0;
+        let colUsed = Array(size).fill(false);
+        let regUsed = Array(size).fill(false);
+        let starRows = Array(size).fill(-1);
+
+        const backtrack = (row) => {
+            if (row === size) { solutions++; return; }
+            for (let col = 0; col < size; col++) {
+                let rid = mapLayout[row][col];
+                if (!colUsed[col] && !regUsed[rid]) {
+                    // 邻近检查优化
+                    if (row > 0) {
+                        let pc = starRows[row-1];
+                        if (Math.abs(pc - col) <= 1) continue;
+                    }
+                    colUsed[col] = true; regUsed[rid] = true; starRows[row] = col;
+                    backtrack(row + 1);
+                    starRows[row] = -1; regUsed[rid] = false; colUsed[col] = false;
+                    if (solutions > 1) return; 
+                }
+            }
+        };
+        backtrack(0);
+        return solutions;
+    }
+
+    // --- 核心改进：异步生成函数 ---
+    static async asyncGenerate(size, onProgress) {
+        let attempts = 0;
+        return new Promise((resolve) => {
+            const nextAttempt = () => {
+                attempts++;
+                if (onProgress) onProgress(attempts);
+
+                // 单次尝试逻辑
+                const stars = this.findValidStars(size);
+                const mapLayout = this.generateRegions(size, stars);
+                if (this.countSolutions(mapLayout, size) === 1) {
+                    const solutionMask = Array.from({ length: size }, () => Array(size).fill(false));
+                    stars.forEach(([r, c]) => solutionMask[r][c] = true);
+                    resolve({ solutionMask, mapLayout });
+                } else {
+                    // 交还控制权给浏览器，防止死循环报警
+                    setTimeout(nextAttempt, 0);
+                }
+            };
+            nextAttempt();
+        });
+    }
+}
+
+// --- Phaser 游戏逻辑 ---
+class MainScene extends Phaser.Scene {
+    constructor() { super('MainScene'); }
+
+    preload() {
+        let pkg = this.make.graphics({x: 0, y: 0, add: false});
+        pkg.fillStyle(0xd35400, 1);
+        pkg.fillRect(8, 12, 30, 22);
+        pkg.lineStyle(2, 0x333333, 0.5);
+        pkg.strokeRect(10, 14, 26, 18);
+        pkg.generateTexture('package', 46, 46);
+    }
+
+    async create() {
+        this.errors = 0; this.found = 0; this.isGameOver = false;
+        this.isDragging = false; this.dragMode = null; this.dragAxis = null;
+        this.startGridX = -1; this.startGridY = -1;
+
+        // 显示 Loading
+        const overlay = document.getElementById('loading-overlay');
+        const countText = document.getElementById('attempt-count');
+        overlay.style.display = 'flex';
+
+        // 开始异步生成
+        this.levelData = await LevelGenerator.asyncGenerate(10, (count) => {
+            countText.innerText = `正在进行第 ${count} 次逻辑校验...`;
+        });
+
+        // 隐藏 Loading 并渲染
+        overlay.style.display = 'none';
+        this.initGame();
+    }
+
+    initGame() {
+        const CONFIG = {
+            gridSize: 10, tileSize: 46, gap: 2, frameSize: 20,
+            colors: [0xff9aa2, 0xffb7b2, 0xffdac1, 0xe2f0cb, 0xb5ead7, 0xc7ceea, 0xafcbff, 0x85e3ff, 0xf3d1f4, 0x95afc0],
+            lineColor: 0x3e2723, woodColor: 0x5d4037, maxErrors: 3
+        };
+
+        this.input.on('pointerup', () => { this.isDragging = false; this.dragMode = null; this.dragAxis = null; });
+        
+        // 绘制
+        const boardSize = CONFIG.gridSize * (CONFIG.tileSize + CONFIG.gap) + CONFIG.gap;
+        const totalSize = boardSize + CONFIG.frameSize * 2;
+        this.add.rectangle(totalSize/2, totalSize/2, totalSize, totalSize, CONFIG.woodColor);
+        this.add.rectangle(totalSize/2, totalSize/2, boardSize, boardSize, CONFIG.lineColor);
+
+        // 棋盘渲染
+        const startPos = CONFIG.frameSize + CONFIG.gap;
+        for (let y = 0; y < CONFIG.gridSize; y++) {
+            for (let x = 0; x < CONFIG.gridSize; x++) {
+                const xPos = startPos + x * (CONFIG.tileSize + CONFIG.gap) + CONFIG.tileSize/2;
+                const yPos = startPos + y * (CONFIG.tileSize + CONFIG.gap) + CONFIG.tileSize/2;
+                const container = this.add.container(xPos, yPos);
+                const colorIdx = this.levelData.mapLayout[y][x];
+                const bg = this.add.rectangle(0, 0, CONFIG.tileSize, CONFIG.tileSize, CONFIG.colors[colorIdx]).setInteractive();
+                
+                const userMark = this.add.text(0, 0, 'X', { color: '#000', alpha: 0.3, fontSize: '24px' }).setOrigin(0.5).setVisible(false);
+                const failMark = this.add.text(0, 0, 'X', { color: '#000', fontSize: '32px', fontStyle: 'bold' }).setOrigin(0.5).setVisible(false);
+                const pkgIcon = this.add.image(0, 0, 'package').setVisible(false);
+                const errorBorder = this.add.graphics().lineStyle(4, 0xff0000, 1).strokeRect(-CONFIG.tileSize/2, -CONFIG.tileSize/2, CONFIG.tileSize, CONFIG.tileSize).setVisible(false);
+
+                container.add([bg, userMark, failMark, pkgIcon, errorBorder]);
+                let cellData = { gx: x, gy: y, opened: false, marked: false, isPackage: this.levelData.solutionMask[y][x], userMark, failMark, pkgIcon, errorBorder, lastClickTime: 0 };
+
+                bg.on('pointerdown', () => {
+                    if (this.isGameOver || cellData.opened) return;
+                    const now = this.time.now;
+                    if (now - cellData.lastClickTime < 300) {
+                        this.handleOpen(cellData);
+                        this.isDragging = false;
+                    } else {
+                        cellData.marked = !cellData.marked;
+                        cellData.userMark.setVisible(cellData.marked);
+                        this.isDragging = true;
+                        this.dragMode = cellData.marked ? 'add' : 'remove';
+                        this.startGridX = x; this.startGridY = y; this.dragAxis = null;
+                    }
+                    cellData.lastClickTime = now;
+                });
+
+                bg.on('pointerover', () => {
+                    if (!this.isDragging || cellData.opened || this.isGameOver) return;
+                    if (!this.dragAxis) {
+                        if (x !== this.startGridX) this.dragAxis = 'row';
+                        else if (y !== this.startGridY) this.dragAxis = 'col';
+                    }
+                    if ((this.dragAxis === 'row' && y === this.startGridY) || (this.dragAxis === 'col' && x === this.startGridX)) {
+                        cellData.marked = (this.dragMode === 'add');
+                        cellData.userMark.setVisible(cellData.marked);
+                    }
+                });
+            }
+        }
+
+        // UI
+        const uiY = boardSize + CONFIG.frameSize * 2 + 25;
+        this.progressText = this.add.text(20, uiY, '', { fontSize: '20px', color: '#ecf0f1', fontStyle: 'bold' });
+        this.errorIcons = [];
+        for(let i=0; i<3; i++) {
+            this.errorIcons.push(this.add.text(380 + i*35, uiY - 5, 'X', { fontSize: '28px', color: '#95a5a6' }));
+        }
+        this.updateStats();
+    }
+
+    handleOpen(cell) {
+        if (cell.opened) return;
+        cell.opened = true; cell.marked = false; cell.userMark.setVisible(false);
+        if (cell.isPackage) { cell.pkgIcon.setVisible(true); this.found++; }
+        else { cell.failMark.setVisible(true); cell.errorBorder.setVisible(true); this.errors++; }
+        this.updateStats();
+        if (this.found === 10) this.showEnd("恭喜你找到了所有的快递！", 0x2ecc71);
+        else if (this.errors >= 3) this.showEnd("任务失败：快递丢了！", 0xe74c3c);
+    }
+
+    updateStats() {
+        this.progressText.setText(`剩余快递: ${10 - this.found}`);
+        for(let i=0; i<this.errors; i++) if(this.errorIcons[i]) this.errorIcons[i].setColor('#e74c3c');
+    }
+
+    showEnd(msg, color) {
+        this.isGameOver = true;
+        const totalSize = 520;
+        const centerX = 260;
+        this.add.rectangle(centerX, centerX, 420, 180, 0x000000, 0.9).setDepth(100).setStrokeStyle(4, 0x5d4037);
+        this.add.text(centerX, centerX - 30, msg, { fontSize: '28px', color: '#fff', fontWeight: 'bold' }).setOrigin(0.5).setDepth(101);
+        const btn = this.add.rectangle(centerX, centerX + 45, 180, 50, color).setInteractive({useHandCursor:true}).setDepth(101);
+        this.add.text(centerX, centerX + 45, "下一局", { fontSize: '22px', color: '#fff' }).setOrigin(0.5).setDepth(102);
+        btn.on('pointerdown', () => this.scene.restart());
+    }
+}
+
+const config = { type: Phaser.AUTO, width: 520, height: 620, parent: 'game-container', backgroundColor: '#2c3e50', scene: MainScene };
+new Phaser.Game(config);
+</script>
+</body>
+</html>
