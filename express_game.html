@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>快递哪去了？- 异步稳定版</title>
+    <title>快递哪去了？</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
     <style>
         body { margin: 0; background-color: #2c3e50; display: flex; flex-direction: column; align-items: center; font-family: 'Microsoft YaHei', sans-serif; user-select: none; padding-top: 20px; }
@@ -10,12 +10,6 @@
         #game-info { width: 520px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 15px; background: #ecf0f1; border-radius: 8px; border: 4px solid #5d4037; box-sizing: border-box; }
         .rule-item { font-size: 13px; color: #333; line-height: 1.5; border-left: 4px solid #d35400; padding-left: 8px; display: flex; align-items: center; }
         #game-container { margin-top: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.5); cursor: crosshair; position: relative; width: 520px; height: 620px; background: #34495e; }
-        
-        /* 改进的 Loading 样式 */
-        #loading-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; display: none; border: 4px solid #5d4037; box-sizing: border-box; }
-        .spinner { width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #f39c12; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        #attempt-count { margin-top: 10px; font-size: 12px; color: #95a5a6; }
     </style>
 </head>
 <body>
@@ -28,125 +22,231 @@
     <div class="rule-item">快递与快递之间<br>互不相邻</div>
 </div>
 
-<div id="game-container">
-    <div id="loading-overlay">
-        <div class="spinner"></div>
-        <div id="loading-text">正在规划快递路线...</div>
-        <div id="attempt-count">正在尝试第 1 次生成</div>
-    </div>
-</div>
+<div id="game-container"></div>
 
 <script>
-/**
- * 核心算法类：采用异步迭代防止浏览器卡死
- */
-class LevelGenerator {
-    // 基础检查：行列和相邻
-    static isPosSafe(r, c, board) {
-        for (let prevR = 0; prevR < r; prevR++) {
-            let prevC = board[prevR];
-            if (prevC === c) return false;
-            if (Math.abs(prevR - r) <= 1 && Math.abs(prevC - c) <= 1) return false;
+const SIZE = 10;
+
+// 生成满足「每行/列各一个、8 方向不相邻」的快递位置
+function findStars() {
+    const board = Array(SIZE).fill(-1);
+    const safe = (r, c) => {
+        for (let pr = 0; pr < r; pr++) {
+            const pc = board[pr];
+            if (pc === c || (Math.abs(pr - r) <= 1 && Math.abs(pc - c) <= 1)) return false;
         }
         return true;
-    }
-
-    // 随机寻找星星点
-    static findValidStars(size) {
-        let board = Array(size).fill(-1);
-        const solve = (row) => {
-            if (row === size) return true;
-            let cols = [...Array(size).keys()].sort(() => Math.random() - 0.5);
-            for (let col of cols) {
-                if (this.isPosSafe(row, col, board)) {
-                    board[row] = col;
-                    if (solve(row + 1)) return true;
-                    board[row] = -1;
-                }
+    };
+    const solve = (row) => {
+        if (row === SIZE) return true;
+        const cols = [...Array(SIZE).keys()].sort(() => Math.random() - 0.5);
+        for (const col of cols) {
+            if (safe(row, col)) {
+                board[row] = col;
+                if (solve(row + 1)) return true;
+                board[row] = -1;
             }
-            return false;
-        };
-        solve(0);
-        return board.map((col, row) => [row, col]);
-    }
-
-    // 扩张区域
-    static generateRegions(size, stars) {
-        let grid = Array.from({ length: size }, () => Array(size).fill(-1));
-        let frontiers = stars.map((pos, idx) => {
-            grid[pos[0]][pos[1]] = idx;
-            return [pos];
-        });
-        let filled = size;
-        while (filled < size * size) {
-            let id = Math.floor(Math.random() * size);
-            let frontier = frontiers[id];
-            if (frontier.length === 0) continue;
-            let idx = Math.floor(Math.random() * frontier.length);
-            let [r, c] = frontier[idx];
-            let neighbors = [[r-1, c], [r+1, c], [r, c-1], [r, c+1]].filter(([nr, nc]) => 
-                nr >= 0 && nr < size && nc >= 0 && nc < size && grid[nr][nc] === -1
-            );
-            if (neighbors.length > 0) {
-                let [nr, nc] = neighbors[Math.floor(Math.random() * neighbors.length)];
-                grid[nr][nc] = id;
-                frontier.push([nr, nc]);
-                filled++;
-            } else frontier.splice(idx, 1);
         }
-        return grid;
+        return false;
+    };
+    solve(0);
+    return board.map((col, row) => [row, col]);
+}
+
+// 两轮扩散法：第一轮每区域只扩散 1 格（控制速度不包围），第二轮按序号补充
+function genRegionsChain(stars) {
+    const n = SIZE;
+    const region = Array.from({ length: n }, () => Array(n).fill(-1));
+    const excluded = Array.from({ length: n }, () => Array(n).fill(false));
+    const marker = Array.from({ length: n }, () => Array(n).fill(-1));
+    const visited = new Array(n).fill(false);
+    const order = [];
+    // 启动孤点（不扩散，作为推理锚点）
+    let cur = Math.floor(Math.random() * n);
+    order.push(cur); visited[cur] = true;
+    const [r0, c0] = stars[cur];
+    region[r0][c0] = cur;
+    for (let i = 0; i < n; i++) { excluded[r0][i] = true; excluded[i][c0] = true; }
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const nr = r0 + dr, nc = c0 + dc;
+        if (nr >= 0 && nr < n && nc >= 0 && nc < n) excluded[nr][nc] = true;
     }
-
-    // 唯一解求解器（带剪枝）
-    static countSolutions(mapLayout, size) {
-        let solutions = 0;
-        let colUsed = Array(size).fill(false);
-        let regUsed = Array(size).fill(false);
-        let starRows = Array(size).fill(-1);
-
-        const backtrack = (row) => {
-            if (row === size) { solutions++; return; }
-            for (let col = 0; col < size; col++) {
-                let rid = mapLayout[row][col];
-                if (!colUsed[col] && !regUsed[rid]) {
-                    // 邻近检查优化
-                    if (row > 0) {
-                        let pc = starRows[row-1];
-                        if (Math.abs(pc - col) <= 1) continue;
-                    }
-                    colUsed[col] = true; regUsed[rid] = true; starRows[row] = col;
-                    backtrack(row + 1);
-                    starRows[row] = -1; regUsed[rid] = false; colUsed[col] = false;
-                    if (solutions > 1) return; 
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (excluded[r][c]) marker[r][c] = 1;
+    // 第一轮：后续每区域只扩散 1 格
+    let step = 1;
+    while (order.length < n) {
+        step++;
+        const candidates = [];
+        for (let i = 0; i < n; i++) {
+            if (visited[i]) continue;
+            const [cr, cc] = stars[i];
+            let adj = false;
+            for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                const nr = cr + dr, nc = cc + dc;
+                if (nr >= 0 && nr < n && nc >= 0 && nc < n && excluded[nr][nc] && region[nr][nc] === -1) { adj = true; break; }
+            }
+            if (adj) candidates.push(i);
+        }
+        let next;
+        if (candidates.length) next = candidates[Math.floor(Math.random() * candidates.length)];
+        else { for (let i = 0; i < n; i++) if (!visited[i]) { next = i; break; } }
+        order.push(next); visited[next] = true;
+        cur = next;
+        const [cr, cc] = stars[cur];
+        region[cr][cc] = cur;
+        for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            const nr = cr + dr, nc = cc + dc;
+            if (nr >= 0 && nr < n && nc >= 0 && nc < n && region[nr][nc] === -1 && excluded[nr][nc]) { region[nr][nc] = cur; break; }
+        }
+        for (let i = 0; i < n; i++) { excluded[cr][i] = true; excluded[i][cc] = true; }
+        for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+            const nr = cr + dr, nc = cc + dc;
+            if (nr >= 0 && nr < n && nc >= 0 && nc < n) excluded[nr][nc] = true;
+        }
+        for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (excluded[r][c] && marker[r][c] === -1) marker[r][c] = step;
+    }
+    // 第二轮：分配到「序号 > marker」的区域（推理时会被排除），选相对大不是最大
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+            if (region[r][c] !== -1) continue;
+            const m = marker[r][c] || 0;
+            let bestRid = -1, bestOrder = 999;
+            for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                const nr = r + dr, nc = c + dc;
+                if (nr >= 0 && nr < n && nc >= 0 && nc < n && region[nr][nc] !== -1) {
+                    const ridOrder = order.indexOf(region[nr][nc]);
+                    if (ridOrder > m && ridOrder < bestOrder) { bestOrder = ridOrder; bestRid = region[nr][nc]; }
                 }
             }
-        };
-        backtrack(0);
-        return solutions;
+            if (bestRid === -1) {
+                for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                    const nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < n && nc >= 0 && nc < n && region[nr][nc] !== -1) { bestRid = region[nr][nc]; break; }
+                }
+            }
+            if (bestRid !== -1) { region[r][c] = bestRid; changed = true; }
+        }
+    }
+    return region;
+}
+
+// 验证能否仅靠确定性逻辑规则（唯一候选 + 锁定/指向 + 邻域排除）推出唯一解
+function isLogicallySolvable(mapping) {
+    const n = SIZE;
+    const cand = Array.from({ length: n }, () => Array(n).fill(true));
+    const placed = new Set();
+
+    const rows = Array.from({ length: n }, (_, r) => Array.from({ length: n }, (_, c) => [r, c]));
+    const cols = Array.from({ length: n }, (_, c) => Array.from({ length: n }, (_, r) => [r, c]));
+    const regions = [];
+    for (let r = 0; r < n; r++) {
+        for (let c = 0; c < n; c++) {
+            (regions[mapping[r][c]] = regions[mapping[r][c]] || []).push([r, c]);
+        }
     }
 
-    // --- 核心改进：异步生成函数 ---
-    static async asyncGenerate(size, onProgress) {
-        let attempts = 0;
-        return new Promise((resolve) => {
-            const nextAttempt = () => {
-                attempts++;
-                if (onProgress) onProgress(attempts);
+    const exclude = (cells, r, c) => {
+        let ch = false;
+        for (const [rr, cc] of cells) {
+            if ((rr !== r || cc !== c) && cand[rr][cc]) { cand[rr][cc] = false; ch = true; }
+        }
+        return ch;
+    };
+    const place = (r, c) => {
+        const key = r + ',' + c;
+        if (placed.has(key)) return false;
+        placed.add(key);
+        let ch = false;
+        ch = exclude(rows[r], r, c) || ch;
+        ch = exclude(cols[c], r, c) || ch;
+        ch = exclude(regions[mapping[r][c]], r, c) || ch;
+        for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                const nr = r + dr, nc = c + dc;
+                if (nr >= 0 && nr < n && nc >= 0 && nc < n && cand[nr][nc]) { cand[nr][nc] = false; ch = true; }
+            }
+        }
+        return ch;
+    };
 
-                // 单次尝试逻辑
-                const stars = this.findValidStars(size);
-                const mapLayout = this.generateRegions(size, stars);
-                if (this.countSolutions(mapLayout, size) === 1) {
-                    const solutionMask = Array.from({ length: size }, () => Array(size).fill(false));
-                    stars.forEach(([r, c]) => solutionMask[r][c] = true);
-                    resolve({ solutionMask, mapLayout });
-                } else {
-                    // 交还控制权给浏览器，防止死循环报警
-                    setTimeout(nextAttempt, 0);
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (let r = 0; r < n; r++) {
+            const cs = [];
+            for (let c = 0; c < n; c++) if (cand[r][c]) cs.push(c);
+            if (cs.length === 1 && place(r, cs[0])) changed = true;
+        }
+        for (let c = 0; c < n; c++) {
+            const rs = [];
+            for (let r = 0; r < n; r++) if (cand[r][c]) rs.push(r);
+            if (rs.length === 1 && place(rs[0], c)) changed = true;
+        }
+        for (let rid = 0; rid < n; rid++) {
+            const cc = regions[rid].filter(([r, c]) => cand[r][c]);
+            if (cc.length === 1 && place(cc[0][0], cc[0][1])) changed = true;
+        }
+        for (let rid = 0; rid < n; rid++) {
+            const cc = regions[rid].filter(([r, c]) => cand[r][c]);
+            if (cc.length <= 1) continue;
+            const rSet = new Set(cc.map(([r]) => r));
+            if (rSet.size === 1) {
+                const r0 = [...rSet][0];
+                for (let c = 0; c < n; c++) {
+                    if (mapping[r0][c] !== rid && cand[r0][c]) { cand[r0][c] = false; changed = true; }
                 }
-            };
-            nextAttempt();
-        });
+            }
+            const cSet = new Set(cc.map(([, c]) => c));
+            if (cSet.size === 1) {
+                const c0 = [...cSet][0];
+                for (let r = 0; r < n; r++) {
+                    if (mapping[r][c0] !== rid && cand[r][c0]) { cand[r][c0] = false; changed = true; }
+                }
+            }
+        }
+        for (let r = 0; r < n; r++) {
+            const cs = [];
+            for (let c = 0; c < n; c++) if (cand[r][c]) cs.push(c);
+            if (cs.length <= 1) continue;
+            const rids = new Set(cs.map((c) => mapping[r][c]));
+            if (rids.size === 1) {
+                const rid = [...rids][0];
+                for (const [rr, cc] of regions[rid]) {
+                    if (rr !== r && cand[rr][cc]) { cand[rr][cc] = false; changed = true; }
+                }
+            }
+        }
+        for (let c = 0; c < n; c++) {
+            const rs = [];
+            for (let r = 0; r < n; r++) if (cand[r][c]) rs.push(r);
+            if (rs.length <= 1) continue;
+            const rids = new Set(rs.map((r) => mapping[r][c]));
+            if (rids.size === 1) {
+                const rid = [...rids][0];
+                for (const [rr, cc] of regions[rid]) {
+                    if (cc !== c && cand[rr][cc]) { cand[rr][cc] = false; changed = true; }
+                }
+            }
+        }
+    }
+    return placed.size === n;
+}
+
+// 同步生成一个逻辑可解的谜题
+function generatePuzzle() {
+    while (true) {
+        const stars = findStars();
+        for (let i = 0; i < 100; i++) {
+            const mapLayout = genRegionsChain(stars);
+            if (isLogicallySolvable(mapLayout)) {
+                const solutionMask = Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
+                stars.forEach(([r, c]) => { solutionMask[r][c] = true; });
+                return { solutionMask, mapLayout };
+            }
+        }
     }
 }
 
@@ -163,23 +263,12 @@ class MainScene extends Phaser.Scene {
         pkg.generateTexture('package', 46, 46);
     }
 
-    async create() {
+    create() {
         this.errors = 0; this.found = 0; this.isGameOver = false;
         this.isDragging = false; this.dragMode = null; this.dragAxis = null;
         this.startGridX = -1; this.startGridY = -1;
 
-        // 显示 Loading
-        const overlay = document.getElementById('loading-overlay');
-        const countText = document.getElementById('attempt-count');
-        overlay.style.display = 'flex';
-
-        // 开始异步生成
-        this.levelData = await LevelGenerator.asyncGenerate(10, (count) => {
-            countText.innerText = `正在进行第 ${count} 次逻辑校验...`;
-        });
-
-        // 隐藏 Loading 并渲染
-        overlay.style.display = 'none';
+        this.levelData = generatePuzzle();
         this.initGame();
     }
 
