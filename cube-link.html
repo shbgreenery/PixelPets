@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D 连连看</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #c8e4f8; font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+  #hud { position: fixed; top: 16px; left: 16px; color: #eee; z-index: 10; line-height: 1.6; }
+  #hud button { margin: 4px 4px 0 0; padding: 6px 14px; border: none; border-radius: 8px; background: #e94560; color: #fff; cursor: pointer; font-size: 14px; }
+  #hud button:hover { background: #ff5c78; }
+  #tip { margin-top: 8px; font-size: 13px; color: #bbb; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div>剩余：<span id="remaining">0</span></div>
+  <button id="hint">提示</button>
+  <button id="shuffle">洗牌</button>
+  <button id="reset">重开</button>
+  <div id="tip"></div>
+</div>
+<script src="link-core.js"></script>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const N = 4;
+const EMOJIS = ['🍎', '🍌', '🍇', '🍉', '🍊', '🍓', '🍑', '🍒', '🐱', '🐶', '🐰', '🐻', '🦊', '🐼', '🐨', '🐯'];
+
+// 预加载 emoji 字体（避免 canvas 绘制时阻塞截图/首次渲染）
+const fontPreloader = document.createElement('div');
+fontPreloader.style.cssText = 'position:absolute;opacity:0;pointer-events:none;font-size:1px';
+fontPreloader.textContent = EMOJIS.join('');
+document.body.appendChild(fontPreloader);
+
+// 用 canvas 把 emoji 字符画成纹理，供 Sprite 使用。Sprite 材质天然 billboard，
+// 无论立方体怎么旋转，emoji 都始终正面朝向相机，方便辨认相同图案。
+function makeEmojiTexture(emoji) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 128, 128);
+  ctx.font = '96px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(emoji, 64, 64);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  return tex;
+}
+
+const emojiTextures = EMOJIS.map(makeEmojiTexture);
+
+const game = new CubeLink(N, 16);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(7, 5, 9);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.domElement.style.touchAction = 'none'; // 禁止浏览器拦截触摸（滚动/缩放）
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+// 半球光：天光（淡蓝）+ 地光（暖白），整体提亮且保留立体感
+scene.add(new THREE.HemisphereLight(0xddeeff, 0xffeedd, 0.7));
+const light = new THREE.DirectionalLight(0xffffff, 1.0);
+light.position.set(5, 10, 7);
+scene.add(light);
+
+// 体素组：每个存活体素一个 Mesh，挂到 voxelGroup 上做整体旋转
+const voxelGroup = new THREE.Group();
+scene.add(voxelGroup);
+
+// 消除线路径组（挂在 voxelGroup 下，跟随立方体旋转）
+const lineGroup = new THREE.Group();
+voxelGroup.add(lineGroup);
+
+// 画消除路径：用 TubeGeometry 做粗管 + 脉冲发光动画
+// 线精确经过每个关键点（起点中心 → 拐点中心 → ... → 终点中心）
+function drawPath(path) {
+  const points = path.map(p => {
+    const wp = voxelPosition(p.x, p.y, p.z);
+    return new THREE.Vector3(wp.x, wp.y, wp.z);
+  });
+  // 构建折线曲线（每段直线，精确连接相邻中心点）
+  const curve = new THREE.CurvePath();
+  for (let i = 0; i < points.length - 1; i++) {
+    curve.add(new THREE.LineCurve3(points[i], points[i + 1]));
+  }
+  const geometry = new THREE.TubeGeometry(curve, 32, 0.12, 12, false);
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: 0xffd700,
+    emissiveIntensity: 1.0,
+    transparent: true,
+    opacity: 1,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.userData.startTime = Date.now();
+  lineGroup.add(mesh);
+  return mesh;
+}
+
+// 让体素闪烁几次（放大缩小），表示即将消除
+function flashMesh(mesh, count = 3, interval = 80) {
+  let flashes = 0;
+  const timer = setInterval(() => {
+    if (flashes >= count * 2) {
+      clearInterval(timer);
+      mesh.scale.setScalar(1.0);
+      return;
+    }
+    mesh.scale.setScalar(flashes % 2 === 0 ? 1.15 : 1.0);
+    flashes++;
+  }, interval);
+}
+
+// 每帧更新消除线动画：脉冲发光 500ms → 淡出 200ms → 移除
+function updateLines() {
+  const now = Date.now();
+  for (let i = lineGroup.children.length - 1; i >= 0; i--) {
+    const mesh = lineGroup.children[i];
+    if (!mesh.userData.startTime) continue;
+    const elapsed = now - mesh.userData.startTime;
+    if (elapsed < 500) {
+      mesh.material.opacity = 0.7 + 0.3 * Math.sin(elapsed * 0.025);
+    } else if (elapsed < 700) {
+      mesh.material.opacity = 1 - (elapsed - 500) / 200;
+    } else {
+      lineGroup.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
+  }
+}
+
+const meshes = new Map(); // key "x,y,z" -> Mesh（实心立方体，六面贴同一 emoji 纹理）
+const geometry = new THREE.BoxGeometry(1, 1, 1);
+
+function keyOf(x, y, z) { return `${x},${y},${z}`; }
+
+function voxelPosition(x, y, z) {
+  return { x: x - (N - 1) / 2, y: y - (N - 1) / 2, z: z - (N - 1) / 2 };
+}
+
+function rebuild() {
+  for (const m of meshes.values()) {
+    voxelGroup.remove(m);
+    m.material.dispose();
+  }
+  meshes.clear();
+  for (let x = 0; x < N; x++)
+    for (let y = 0; y < N; y++)
+      for (let z = 0; z < N; z++) {
+        const t = game.grid[x][y][z];
+        if (t <= 0) continue;
+        const mat = new THREE.MeshBasicMaterial({ map: emojiTextures[t - 1] });
+        const mesh = new THREE.Mesh(geometry, mat);
+        const p = voxelPosition(x, y, z);
+        mesh.position.set(p.x, p.y, p.z);
+        mesh.userData = { x, y, z, type: t };
+        voxelGroup.add(mesh);
+        meshes.set(keyOf(x, y, z), mesh);
+      }
+  document.getElementById('remaining').textContent = game.remaining;
+}
+rebuild();
+
+// —— 拖拽旋转 ——
+let dragging = false, moved = false, prevX = 0, prevY = 0, startX = 0, startY = 0;
+renderer.domElement.addEventListener('pointerdown', e => {
+  dragging = true; moved = false;
+  prevX = startX = e.clientX; prevY = startY = e.clientY;
+});
+window.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - prevX, dy = e.clientY - prevY;
+  voxelGroup.rotation.y += dx * 0.01;
+  voxelGroup.rotation.x += dy * 0.01;
+  prevX = e.clientX; prevY = e.clientY;
+  if (Math.hypot(e.clientX - startX, e.clientY - startY) > 5) moved = true;
+});
+window.addEventListener('pointerup', () => { dragging = false; });
+
+// —— 拾取与选中 ——
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let selected = null; // 已选中的体素 Mesh
+
+renderer.domElement.addEventListener('click', e => {
+  if (dragging || moved) { moved = false; return; }
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(voxelGroup.children, false);
+  if (hits.length === 0) return;
+  const mesh = hits[0].object;
+  const a = mesh.userData;
+  if (!selected) {
+    selected = mesh;
+    setHighlight(mesh, true);
+    setTip(`已选中：(${a.x},${a.y},${a.z})`);
+    return;
+  }
+  const b = selected.userData;
+  if (selected === mesh) { setHighlight(selected, false); selected = null; setTip(''); return; }
+  if (a.type !== b.type) {
+    setHighlight(selected, false); selected = null;
+    setTip('不能消除，图案不同'); return;
+  }
+  const path = game.canConnect({ x: b.x, y: b.y, z: b.z }, { x: a.x, y: a.y, z: a.z });
+  if (!path) {
+    setHighlight(selected, false); selected = null;
+    setTip('不能消除，路径不通'); return;
+  }
+  // 画消除线 + 两个体素闪烁 → 闪烁完后消除
+  drawPath(path);
+  setHighlight(selected, false);
+  const m1 = selected;
+  selected = null;
+  flashMesh(m1, 3, 80);
+  flashMesh(mesh, 3, 80);
+  setTip('消除成功');
+  setTimeout(() => doEliminate(m1, mesh), 260);
+});
+
+function setHighlight(mesh, on) {
+  const s = on ? 1.1 : 1.0;
+  mesh.scale.setScalar(s);
+}
+
+function setTip(msg) { document.getElementById('tip').textContent = msg; }
+
+function doEliminate(m1, m2) {
+  const a = m1.userData, b = m2.userData;
+  game.eliminate({ x: a.x, y: a.y, z: a.z }, { x: b.x, y: b.y, z: b.z });
+  voxelGroup.remove(m1); voxelGroup.remove(m2);
+  m1.material.dispose(); m2.material.dispose();
+  meshes.delete(keyOf(a.x, a.y, a.z)); meshes.delete(keyOf(b.x, b.y, b.z));
+  document.getElementById('remaining').textContent = game.remaining;
+  if (game.remaining === 0) setTip('胜利！全部消除');
+  else if (!game.hasPair()) { setTip('无可消对，自动洗牌'); game.shuffle(); rebuild(); }
+}
+
+// —— 按钮 ——
+document.getElementById('hint').addEventListener('click', () => {
+  const p = game.findPair();
+  if (!p) { setTip('无可消对'); return; }
+  // 画路径 + 高亮闪烁两个体素
+  const line = drawPath(p.path);
+  const m1 = meshes.get(keyOf(p.a.x, p.a.y, p.a.z));
+  const m2 = meshes.get(keyOf(p.b.x, p.b.y, p.b.z));
+  if (m1) setHighlight(m1, true);
+  if (m2) setHighlight(m2, true);
+  setTip(`提示：(${p.a.x},${p.a.y},${p.a.z}) ↔ (${p.b.x},${p.b.y},${p.b.z})`);
+  setTimeout(() => {
+    if (m1) setHighlight(m1, false);
+    if (m2) setHighlight(m2, false);
+  }, 800);
+});
+document.getElementById('shuffle').addEventListener('click', () => { game.shuffle(); rebuild(); setTip('已洗牌'); });
+document.getElementById('reset').addEventListener('click', () => {
+  location.reload();
+});
+
+function render() {
+  requestAnimationFrame(render);
+  updateLines();
+  renderer.render(scene, camera);
+}
+render();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
