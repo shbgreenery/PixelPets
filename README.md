@@ -12,6 +12,7 @@
 | [快递哪去了](express-delivery.html) | Phaser 3 | 10x10 逻辑推理：每行每列每种颜色只有一个快递，快递互不相邻 |
 | [消消乐](GemMatch.html) | 纯 DOM | 经典三消，可自定义倒计时（1-15 分钟），带暂停、连击、最高分记录 |
 | [3D 连连看](cube-link.html) | Three.js | 4x4x4 体素立方体，任意两个相同图案用 <=2 拐点连线消除，路径可绕到立方体外 |
+| [2D 连连看](link2d.html) | Phaser 4 | 8x8/12x12/16x16 三种尺寸，≤2 拐点连线消除，消除后按随机物效方向沉底重排 |
 
 ## 项目结构
 
@@ -25,6 +26,9 @@ bfs.js                  # 动物消除核心：Dijkstra 松弛版 BFS 寻路
 bfs.test.js             # BFS 单元测试
 link-core.js            # 3D 连连看核心：体素模型、<=2 拐点折线判定
 link-core.test.js       # 连连看核心单元测试
+link2d.html             # 2D 连连看
+link2d-core.js          # 2D 连连看核心：连接判定、9 种物效重排、寻对与死局检测
+link2d-core.test.js     # 2D 连连看核心单元测试
 ```
 
 核心算法与渲染分离 -- `bfs.js` 和 `link-core.js` 是纯逻辑模块，不依赖任何游戏引擎或 DOM，可独立测试。
@@ -49,6 +53,7 @@ python3 -m http.server 8080
 ```bash
 node bfs.test.js
 node link-core.test.js
+node link2d-core.test.js
 ```
 
 ## 技术选型

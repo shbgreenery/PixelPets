@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2D 连连看</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: auto; background: #dff0fb; font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+  #hud { color: #333; padding: 12px 16px; line-height: 1.8; }
+  #hud button { margin: 4px 4px 0 0; padding: 6px 14px; border: none; border-radius: 8px; background: #e94560; color: #fff; cursor: pointer; font-size: 14px; }
+  #hud button:hover { background: #ff5c78; }
+  #tip { margin-top: 8px; font-size: 13px; color: #666; }
+  #size-panel { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 20; }
+  #size-panel.hidden { display: none; }
+  #game { display: flex; justify-content: center; }
+  #size-panel h2 { color: #fff; margin-bottom: 20px; }
+  #size-panel button { margin: 8px; padding: 14px 28px; font-size: 18px; border: none; border-radius: 10px; background: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div>剩余：<span id="remaining">0</span></div>
+  <button id="hint">提示(3)</button>
+  <button id="shuffle">重排</button>
+  <button id="reset">重开</button>
+  <div id="tip"></div>
+</div>
+<div id="size-panel">
+  <h2>选择棋盘尺寸</h2>
+  <div>
+    <button data-size="8">8x8</button>
+    <button data-size="12">12x12</button>
+    <button data-size="16">16x16</button>
+  </div>
+</div>
+<div id="game"></div>
+<script src="https://cdn.jsdelivr.net/npm/phaser@4.2.1/dist/phaser.min.js" integrity="sha384-kyUQ5+cxc6+X89xEG6DhcXLcDU9T3Z+o/45VdT6pgAwtG6gxtAzYTEn0Wwj/BKZd" crossorigin="anonymous"></script>
+<script src="link2d-core.js"></script>
+<script>
+const EMOJIS = ['🍎', '🍌', '🍇', '🍉', '🍊', '🍓', '🍑', '🍒', '🐱', '🐶', '🐰', '🐻', '🦊', '🐼', '🐨', '🐯', '🐸', '🐵', '🦁', '🐮', '🐷', '🐭', '🐹', '🐔', '🦄', '🐝', '🦋', '🐢', '🐙', '🦀', '🐬', '🐳', '🦜', '🦚', '🌵', '🌲', '🌸', '🌺', '🍄', '🍀', '⭐', '🌙', '☀️', '🌈', '⚽', '🏀', '🎈', '🎁', '🔔', '🎵', '🍕', '🍔', '🍦', '🍩', '🍪', '🎂', '🧁', '🍭', '🍬', '🍫', '🥨', '🥞', '🧀', '🥝'];
+
+const EFFECTS = ['up', 'down', 'left', 'right', 'lr-spread', 'ud-spread', 'scatter', 'gather', 'none'];
+let CELL = 40;   // 每个方块像素（startGame 时按视口动态算）
+let PAD = 40;    // 棋盘四周留白（动态 = CELL，给边界层绕路路径空间）
+
+let N = 8;         // 默认尺寸
+let game;          // Link2D 实例
+let effect;        // 本局物效
+let hintLeft = 3;  // 提示剩余次数
+
+// 随机选择 emoji 数组子集，返回前 n 个（每种图案 4 个 → 需 N*N/4 种）
+function pickEmojis(n) {
+  const arr = EMOJIS.slice();
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, n);
+}
+const emojiList = pickEmojis(64); // 足够 16x16
+
+// 网格坐标 -> 像素坐标（方块中心）
+function toPX(x, y) { return { x: PAD + x * CELL + CELL / 2, y: PAD + y * CELL + CELL / 2 }; }
+
+// 根据视口动态算 CELL/PAD：棋盘是正方形，受限于可用宽高
+function computeSize(N) {
+  const safe = 16;  // 安全边距：左右防曲面屏弧区，底部防手势条
+  const hudH = document.getElementById('hud').offsetHeight;
+  const availW = window.innerWidth - safe * 2;
+  const availH = window.innerHeight - hudH - safe;
+  const avail = Math.min(availW, availH);
+  PAD = 20;  // 边界层绕路留白，固定较小值（线宽 4px 够用），让方块尽量大
+  CELL = Math.max(16, Math.floor((avail - PAD * 2) / N));
+  return { width: PAD * 2 + N * CELL, height: PAD * 2 + N * CELL };
+}
+
+class GameScene extends Phaser.Scene {
+  create() {
+    this.tiles = new Map();   // key "x,y" -> Phaser text 对象
+    this.selected = null;     // 已选中方块坐标 {x,y}
+    this.lineGfx = this.add.graphics().setDepth(5);
+    this.buildBoard();
+    this.hintBtn = document.getElementById('hint');
+    this.shuffleBtn = document.getElementById('shuffle');
+    this.resetBtn = document.getElementById('reset');
+    this.tip = document.getElementById('tip');
+    this.hintBtn.onclick = () => this.doHint();
+    this.shuffleBtn.onclick = () => this.doShuffle();
+    this.resetBtn.onclick = () => location.reload();
+    document.getElementById('remaining').textContent = game.remaining;
+  }
+
+  buildBoard() {
+    this.tiles.clear();
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        const t = game.grid[y][x];
+        if (t <= 0) continue;
+        const p = toPX(x, y);
+        const obj = this.add.text(p.x, p.y, emojiList[t - 1], { fontSize: Math.round(CELL * 0.8) })
+          .setOrigin(0.5).setInteractive();
+        obj.userData = { x, y, type: t };
+        obj.on('pointerdown', () => this.onTile(obj));
+        this.tiles.set(`${x},${y}`, obj);
+      }
+  }
+
+  onTile(obj) {
+    const a = obj.userData;
+    if (!this.selected) {
+      this.selected = obj;
+      this.setHighlight(obj, true);
+      this.tip.textContent = '已选中';
+      return;
+    }
+    const b = this.selected.userData;
+    if (this.selected === obj) { this.setHighlight(obj, false); this.selected = null; this.tip.textContent = ''; return; }
+    if (a.type !== b.type) {
+      this.setHighlight(this.selected, false); this.selected = null;
+      this.tip.textContent = '图案不同，不能消除'; return;
+    }
+    const path = game.canConnect({ x: b.x, y: b.y }, { x: a.x, y: a.y });
+    if (!path) {
+      this.setHighlight(this.selected, false); this.selected = null;
+      this.tip.textContent = '路径不通，不能消除'; return;
+    }
+    this.setHighlight(this.selected, false);
+    const m1 = this.selected;
+    this.selected = null;
+    this.drawPath(path);
+    this.eliminateWithFlash(m1, obj);
+  }
+
+  setHighlight(obj, on) { obj.setScale(on ? 1.2 : 1.0); obj.setTint(on ? 0xffd700 : 0xffffff); }
+
+  drawPath(path) {
+    const g = this.lineGfx;
+    g.clear();
+    g.lineStyle(4, 0xffd700, 0.9);
+    const pts = path.map(p => toPX(p.x, p.y));
+    g.beginPath();
+    g.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
+    g.strokePath();
+  }
+
+  eliminateWithFlash(m1, m2) {
+    const a = m1.userData, b = m2.userData;
+    this.tweens.add({ targets: [m1, m2], scale: 0, duration: 200, ease: 'Power2', onComplete: () => {
+      game.eliminate({ x: a.x, y: a.y }, { x: b.x, y: b.y });
+      m1.destroy(); m2.destroy();
+      this.tiles.delete(`${a.x},${a.y}`); this.tiles.delete(`${b.x},${b.y}`);
+      this.lineGfx.clear();
+      document.getElementById('remaining').textContent = game.remaining;
+      this.afterEliminate();
+    } });
+  }
+
+  // 消除后触发物效：核心层先算出移动映射，渲染层据映射做 tween 动画
+  afterEliminate() {
+    if (game.remaining === 0) { this.tip.textContent = '胜利！全部消除'; return; }
+    const moves = game.applyEffect(effect);  // 改写 game.grid 并返回映射
+    // 按映射把每个方块 tween 到新坐标
+    for (const { from, to } of moves) {
+      const obj = this.tiles.get(`${from.x},${from.y}`);
+      if (!obj) continue;
+      const np = toPX(to.x, to.y);
+      obj.userData = { x: to.x, y: to.y, type: obj.userData.type };
+      this.tiles.delete(`${from.x},${from.y}`);
+      this.tiles.set(`${to.x},${to.y}`, obj);
+      this.tweens.add({ targets: obj, x: np.x, y: np.y, duration: 180, ease: 'Power2' });
+    }
+    // 物效沉底后判死局：无可消对时自动重排
+    if (!game.hasPair()) {
+      this.tip.textContent = '无可消对，自动重排';
+      setTimeout(() => this.doShuffle(), 400);  // 等物效动画播完再重排
+    }
+  }
+
+  doHint() {
+    if (hintLeft <= 0) { this.tip.textContent = '提示次数已用完'; return; }
+    const p = game.findPair();
+    if (!p) { this.tip.textContent = '无可消对'; return; }
+    hintLeft--;
+    this.hintBtn.textContent = `提示(${hintLeft})`;
+    const m1 = this.tiles.get(`${p.a.x},${p.a.y}`);
+    const m2 = this.tiles.get(`${p.b.x},${p.b.y}`);
+    if (!m1 || !m2) return;
+    this.drawPath(p.path);
+    this.eliminateWithFlash(m1, m2);  // 提示后自动消除该对
+  }
+
+  doShuffle() {
+    game.shuffle();
+    this.clearTiles();
+    this.selected = null;
+    this.lineGfx.clear();
+    this.buildBoard();
+    this.tip.textContent = '已重排';
+  }
+
+  clearTiles() {
+    for (const obj of this.tiles.values()) obj.destroy();
+    this.tiles.clear();
+  }
+}
+
+function startGame(size) {
+  N = size;
+  game = new Link2D(N, N);
+  effect = EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+  document.getElementById('size-panel').classList.add('hidden');
+  const { width, height } = computeSize(N);
+  new Phaser.Game({
+    type: Phaser.AUTO,
+    width,
+    height,
+    backgroundColor: '#dff0fb',
+    scene: GameScene,
+    parent: 'game',
+  });
+}
+
+document.querySelectorAll('#size-panel button').forEach(btn => {
+  btn.addEventListener('click', () => startGame(parseInt(btn.dataset.size, 10)));
+});
+</script>
+</body>
+</html>
