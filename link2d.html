@@ -9,7 +9,13 @@
   #hud { color: #333; padding: 12px 16px; line-height: 1.8; }
   #hud button { margin: 4px 4px 0 0; padding: 6px 14px; border: none; border-radius: 8px; background: #e94560; color: #fff; cursor: pointer; font-size: 14px; }
   #hud button:hover { background: #ff5c78; }
-  #tip { margin-top: 8px; font-size: 13px; color: #666; }
+  #tip {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    padding: 8px 16px; background: rgba(0,0,0,0.7); color: #fff;
+    font-size: 14px; border-radius: 8px; pointer-events: none; z-index: 30;
+    opacity: 0; transition: opacity 0.2s;
+  }
+  #tip.show { opacity: 1; }
   #size-panel { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 20; }
   #size-panel.hidden { display: none; }
   #game { display: flex; justify-content: center; }
@@ -105,24 +111,26 @@ class GameScene extends Phaser.Scene {
       }
   }
 
+  select(obj) {
+    this.selected = obj;
+    this.setHighlight(obj, true);
+  }
+
   onTile(obj) {
     const a = obj.userData;
-    if (!this.selected) {
-      this.selected = obj;
-      this.setHighlight(obj, true);
-      this.tip.textContent = '已选中';
+    if (!this.selected) { this.select(obj); return; }
+    if (this.selected === obj) {
+      this.setHighlight(obj, false);
+      this.selected = null;
       return;
     }
     const b = this.selected.userData;
-    if (this.selected === obj) { this.setHighlight(obj, false); this.selected = null; this.tip.textContent = ''; return; }
-    if (a.type !== b.type) {
-      this.setHighlight(this.selected, false); this.selected = null;
-      this.tip.textContent = '图案不同，不能消除'; return;
-    }
-    const path = game.canConnect({ x: b.x, y: b.y }, { x: a.x, y: a.y });
+    const path = (a.type === b.type) ? game.canConnect({ x: b.x, y: b.y }, { x: a.x, y: a.y }) : null;
     if (!path) {
-      this.setHighlight(this.selected, false); this.selected = null;
-      this.tip.textContent = '路径不通，不能消除'; return;
+      // 无法消除：取消第一个，第二个转为选中
+      this.setHighlight(this.selected, false);
+      this.select(obj);
+      return;
     }
     this.setHighlight(this.selected, false);
     const m1 = this.selected;
@@ -158,7 +166,7 @@ class GameScene extends Phaser.Scene {
 
   // 消除后触发物效：核心层先算出移动映射，渲染层据映射做 tween 动画
   afterEliminate() {
-    if (game.remaining === 0) { this.tip.textContent = '胜利！全部消除'; return; }
+    if (game.remaining === 0) { this.showTip('胜利！全部消除', 0); return; }
     const moves = game.applyEffect(effect);  // 改写 game.grid 并返回映射
     // 按映射把每个方块 tween 到新坐标
     for (const { from, to } of moves) {
@@ -172,15 +180,21 @@ class GameScene extends Phaser.Scene {
     }
     // 物效沉底后判死局：无可消对时自动重排
     if (!game.hasPair()) {
-      this.tip.textContent = '无可消对，自动重排';
       setTimeout(() => this.doShuffle(), 400);  // 等物效动画播完再重排
     }
   }
 
+  showTip(msg, duration = 1500) {
+    this.tip.textContent = msg;
+    this.tip.classList.add('show');
+    clearTimeout(this._tipTimer);
+    if (duration > 0) this._tipTimer = setTimeout(() => this.tip.classList.remove('show'), duration);
+  }
+
   doHint() {
-    if (hintLeft <= 0) { this.tip.textContent = '提示次数已用完'; return; }
+    if (hintLeft <= 0) { this.showTip('提示次数已用完'); return; }
     const p = game.findPair();
-    if (!p) { this.tip.textContent = '无可消对'; return; }
+    if (!p) return;
     hintLeft--;
     this.hintBtn.textContent = `提示(${hintLeft})`;
     const m1 = this.tiles.get(`${p.a.x},${p.a.y}`);
@@ -196,7 +210,6 @@ class GameScene extends Phaser.Scene {
     this.selected = null;
     this.lineGfx.clear();
     this.buildBoard();
-    this.tip.textContent = '已重排';
   }
 
   clearTiles() {
