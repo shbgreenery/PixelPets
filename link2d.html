@@ -29,6 +29,7 @@
   <button id="hint">提示(3)</button>
   <button id="shuffle">重排</button>
   <button id="reset">重开</button>
+  <button id="sound">声音：开</button>
   <div id="tip"></div>
 </div>
 <div id="size-panel">
@@ -53,6 +54,27 @@ let N = 8;         // 默认尺寸
 let game;          // Link2D 实例
 let effect;        // 本局物效
 let hintLeft = 3;  // 提示剩余次数
+
+// 消除音效：用 Web Audio 合成短促「叮」声，无需音频文件
+let soundOn = true;
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new AudioContext();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+function playEliminateSound() {
+  if (!audioCtx || !soundOn) return;
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.connect(g); g.connect(audioCtx.destination);
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(660, t);
+  o.frequency.exponentialRampToValueAtTime(990, t + 0.08);
+  g.gain.setValueAtTime(0.25, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+  o.start(t); o.stop(t + 0.18);
+}
 
 // 随机选择 emoji 数组子集，返回前 n 个（每种图案 4 个 → 需 N*N/4 种）
 function pickEmojis(n) {
@@ -93,6 +115,11 @@ class GameScene extends Phaser.Scene {
     this.hintBtn.onclick = () => this.doHint();
     this.shuffleBtn.onclick = () => this.doShuffle();
     this.resetBtn.onclick = () => location.reload();
+    this.soundBtn = document.getElementById('sound');
+    this.soundBtn.onclick = () => {
+      soundOn = !soundOn;
+      this.soundBtn.textContent = soundOn ? '声音：开' : '声音：关';
+    };
     document.getElementById('remaining').textContent = game.remaining;
   }
 
@@ -104,7 +131,9 @@ class GameScene extends Phaser.Scene {
         if (t <= 0) continue;
         const p = toPX(x, y);
         const obj = this.add.text(p.x, p.y, emojiList[t - 1], { fontSize: Math.round(CELL * 0.8) })
-          .setOrigin(0.5).setInteractive();
+          .setOrigin(0.5).setInteractive()
+          .setBackgroundColor('#ffffff')
+          .setPadding(Math.round(CELL * 0.08));
         obj.userData = { x, y, type: t };
         obj.on('pointerdown', () => this.onTile(obj));
         this.tiles.set(`${x},${y}`, obj);
@@ -117,6 +146,7 @@ class GameScene extends Phaser.Scene {
   }
 
   onTile(obj) {
+    ensureAudio();  // 首次点击时解锁音频（浏览器手势策略）
     const a = obj.userData;
     if (!this.selected) { this.select(obj); return; }
     if (this.selected === obj) {
@@ -155,6 +185,7 @@ class GameScene extends Phaser.Scene {
   eliminateWithFlash(m1, m2) {
     const a = m1.userData, b = m2.userData;
     this.tweens.add({ targets: [m1, m2], scale: 0, duration: 200, ease: 'Power2', onComplete: () => {
+      playEliminateSound();
       game.eliminate({ x: a.x, y: a.y }, { x: b.x, y: b.y });
       m1.destroy(); m2.destroy();
       this.tiles.delete(`${a.x},${a.y}`); this.tiles.delete(`${b.x},${b.y}`);
