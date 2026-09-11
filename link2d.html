@@ -111,8 +111,18 @@ function computeSize(N) {
 }
 
 class GameScene extends Phaser.Scene {
+  preload() {
+    // 加载全部 64 个 emoji 的 SVG（Twemoji CDN，光栅化到 128x128 保证高分辨率）
+    EMOJIS.forEach(emoji => {
+      const codepoint = emoji.codePointAt(0).toString(16);
+      this.load.svg(`emoji_${codepoint}`,
+        `https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/${codepoint}.svg`,
+        { width: 128, height: 128 });
+    });
+  }
+
   create() {
-    this.tiles = new Map();   // key "x,y" -> Phaser text 对象
+    this.tiles = new Map();   // key "x,y" -> Phaser container（bg + image）
     this.selected = null;     // 已选中方块坐标 {x,y}
     this.lineGfx = this.add.graphics().setDepth(5);
     this.buildBoard();
@@ -139,13 +149,20 @@ class GameScene extends Phaser.Scene {
         const t = game.grid[y][x];
         if (t <= 0) continue;
         const p = toPX(x, y);
-        const obj = this.add.text(p.x, p.y, emojiList[t - 1], { fontSize: Math.round(CELL * 0.8) })
-          .setOrigin(0.5).setInteractive()
-          .setBackgroundColor('#ffffff')
-          .setPadding(Math.round(CELL * 0.08));
-        obj.userData = { x, y, type: t };
-        obj.on('pointerdown', () => this.onTile(obj));
-        this.tiles.set(`${x},${y}`, obj);
+        // Container 位置 = 方块中心（子对象 origin 默认 0.5，(0,0) 即中心）
+        const container = this.add.container(p.x, p.y);
+        // 白色背景块（中心在 container 内 (0,0)）
+        const bg = this.add.rectangle(0, 0, CELL * 0.92, CELL * 0.92, 0xffffff);
+        // emoji 图片（中心在 container 内 (0,0)）
+        const emoji = emojiList[t - 1];
+        const codepoint = emoji.codePointAt(0).toString(16);
+        const img = this.add.image(0, 0, `emoji_${codepoint}`)
+          .setDisplaySize(CELL * 0.8, CELL * 0.8)
+          .setInteractive();
+        container.add([bg, img]);
+        container.userData = { x, y, type: t };
+        img.on('pointerdown', () => this.onTile(container));
+        this.tiles.set(`${x},${y}`, container);
       }
   }
 
@@ -154,12 +171,12 @@ class GameScene extends Phaser.Scene {
     this.setHighlight(obj, true);
   }
 
-  onTile(obj) {
+  onTile(container) {
     ensureAudio();  // 首次点击时解锁音频（浏览器手势策略）
-    const a = obj.userData;
-    if (!this.selected) { this.select(obj); return; }
-    if (this.selected === obj) {
-      this.setHighlight(obj, false);
+    const a = container.userData;
+    if (!this.selected) { this.select(container); return; }
+    if (this.selected === container) {
+      this.setHighlight(container, false);
       this.selected = null;
       return;
     }
@@ -168,17 +185,21 @@ class GameScene extends Phaser.Scene {
     if (!path) {
       // 无法消除：取消第一个，第二个转为选中
       this.setHighlight(this.selected, false);
-      this.select(obj);
+      this.select(container);
       return;
     }
     this.setHighlight(this.selected, false);
     const m1 = this.selected;
     this.selected = null;
     this.drawPath(path);
-    this.eliminateWithFlash(m1, obj);
+    this.eliminateWithFlash(m1, container);
   }
 
-  setHighlight(obj, on) { obj.setScale(on ? 1.2 : 1.0); obj.setTint(on ? 0xffd700 : 0xffffff); }
+  setHighlight(container, on) {
+    container.setScale(on ? 1.2 : 1.0);
+    const img = container.getAt(1); // image 是第二个子对象（bg 是第一个）
+    img.setTint(on ? 0xffd700 : 0xffffff);
+  }
 
   drawPath(path) {
     const g = this.lineGfx;
