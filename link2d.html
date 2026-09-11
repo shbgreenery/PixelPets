@@ -112,11 +112,11 @@ function computeSize(N) {
 
 class GameScene extends Phaser.Scene {
   preload() {
-    // 加载全部 64 个 emoji 的 SVG（Twemoji CDN，光栅化到 128x128 保证高分辨率）
+    // 加载全部 64 个 emoji 的 SVG（Noto Emoji，彩色立体风格）
     EMOJIS.forEach(emoji => {
       const codepoint = emoji.codePointAt(0).toString(16);
       this.load.svg(`emoji_${codepoint}`,
-        `https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/${codepoint}.svg`,
+        `https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@main/svg/emoji_u${codepoint}.svg`,
         { width: 128, height: 128 });
     });
   }
