@@ -21,11 +21,15 @@
   #game { display: flex; justify-content: center; }
   #size-panel h2 { color: #fff; margin-bottom: 20px; }
   #size-panel button { margin: 8px; padding: 14px 28px; font-size: 18px; border: none; border-radius: 10px; background: #fff; cursor: pointer; }
+  #win-panel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 12px; background: #fff; padding: 24px 32px; border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,0.2); z-index: 40; }
+  #win-panel.hidden { display: none; }
+  #win-panel .win-text { font-size: 18px; color: #333; }
+  #win-panel button { padding: 10px 24px; font-size: 16px; border: none; border-radius: 10px; background: #e94560; color: #fff; cursor: pointer; }
+  #win-panel button:hover { background: #ff5c78; }
 </style>
 </head>
 <body>
 <div id="hud">
-  <div>剩余：<span id="remaining">0</span></div>
   <button id="hint">提示(3)</button>
   <button id="shuffle">重排</button>
   <button id="reset">重开</button>
@@ -39,6 +43,10 @@
     <button data-size="12">12x12</button>
     <button data-size="16">16x16</button>
   </div>
+</div>
+<div id="win-panel" class="hidden">
+  <div class="win-text">胜利！全部消除</div>
+  <button id="next">下一局</button>
 </div>
 <div id="game"></div>
 <script src="https://cdn.jsdelivr.net/npm/phaser@4.2.1/dist/phaser.min.js" integrity="sha384-kyUQ5+cxc6+X89xEG6DhcXLcDU9T3Z+o/45VdT6pgAwtG6gxtAzYTEn0Wwj/BKZd" crossorigin="anonymous"></script>
@@ -85,7 +93,7 @@ function pickEmojis(n) {
   }
   return arr.slice(0, n);
 }
-const emojiList = pickEmojis(64); // 足够 16x16
+let emojiList = pickEmojis(64); // 足够 16x16，下一局时重新抽取刷新图案
 
 // 网格坐标 -> 像素坐标（方块中心）
 function toPX(x, y) { return { x: PAD + x * CELL + CELL / 2, y: PAD + y * CELL + CELL / 2 }; }
@@ -120,7 +128,8 @@ class GameScene extends Phaser.Scene {
       soundOn = !soundOn;
       this.soundBtn.textContent = soundOn ? '声音：开' : '声音：关';
     };
-    document.getElementById('remaining').textContent = game.remaining;
+    this.nextBtn = document.getElementById('next');
+    this.nextBtn.onclick = () => this.restartRound();
   }
 
   buildBoard() {
@@ -190,14 +199,16 @@ class GameScene extends Phaser.Scene {
       m1.destroy(); m2.destroy();
       this.tiles.delete(`${a.x},${a.y}`); this.tiles.delete(`${b.x},${b.y}`);
       this.lineGfx.clear();
-      document.getElementById('remaining').textContent = game.remaining;
       this.afterEliminate();
     } });
   }
 
   // 消除后触发物效：核心层先算出移动映射，渲染层据映射做 tween 动画
   afterEliminate() {
-    if (game.remaining === 0) { this.showTip('胜利！全部消除', 0); return; }
+    if (game.remaining === 0) {
+      document.getElementById('win-panel').classList.remove('hidden');
+      return;
+    }
     const moves = game.applyEffect(effect);  // 改写 game.grid 并返回映射
     // 按映射把每个方块 tween 到新坐标
     for (const { from, to } of moves) {
@@ -243,6 +254,20 @@ class GameScene extends Phaser.Scene {
     this.buildBoard();
   }
 
+  // 下一局：尺寸 N 不变，刷新物效与图案，重置提示次数
+  restartRound() {
+    document.getElementById('win-panel').classList.add('hidden');
+    game = new Link2D(N, N);
+    effect = EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+    emojiList = pickEmojis(64);
+    hintLeft = 3;
+    this.hintBtn.textContent = `提示(${hintLeft})`;
+    this.clearTiles();
+    this.selected = null;
+    this.lineGfx.clear();
+    this.buildBoard();
+  }
+
   clearTiles() {
     for (const obj of this.tiles.values()) obj.destroy();
     this.tiles.clear();
@@ -260,6 +285,7 @@ function startGame(size) {
     width,
     height,
     backgroundColor: '#dff0fb',
+    resolution: window.devicePixelRatio,
     scene: GameScene,
     parent: 'game',
   });
