@@ -5,9 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>沙画 · Phaser 4</title>
 <style>
-body { margin: 0; background: #2b3138; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+/* 用 svh（地址栏展开时的高度）而不是 vh：手机上 100vh 指的是地址栏收起时的高度，
+   比实际可见区大，配合 body 的 align-items:center 会把画布底部推出屏幕外，
+   而且内容高度正好等于 min-height 导致页面不滚动，底部按钮就彻底看不见了。
+   100svh 保证地址栏展开时也放得下。两行写法是给不支持 svh 的老浏览器兜底。 */
+html, body { height: 100%; }
+body {
+  margin: 0; background: #2b3138; display: flex; justify-content: center; align-items: center;
+  min-height: 100vh; min-height: 100svh;
+}
 #game { background: #6b727a; }
-canvas { display: block; max-width: 100vw; max-height: 100vh; }
+canvas {
+  display: block;
+  max-width: 100vw; max-height: 100vh;
+  max-height: 100svh;
+}
 </style>
 </head>
 <body>
