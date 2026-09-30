@@ -13,7 +13,7 @@ const {
 
 // ---------- 常量自洽 ----------
 assert.strictEqual(SAND_COLS * SAND_ROWS, TOTAL_SAND, '沙粒总数应等于网格格数');
-assert.strictEqual(TOTAL_SAND, 120000, '沙粒总数应为 120,000');
+assert.strictEqual(TOTAL_SAND, 99000, '沙粒总数应为 99,000（沙盘压到 600×660 后）');
 assert.strictEqual(PLATE_TIERS[0], 2400, '最大盘子档位应为 2400');
 
 // ---------- generateScene：填满、合法、确定性 ----------
@@ -259,13 +259,13 @@ assert.notDeepStrictEqual(Array.from(s1), Array.from(s3), '不同 seed 应生成
 // ---------- splitPlates：全 0 输入返回空 ----------
 assert.strictEqual(splitPlates(new Array(11).fill(0)).length, 0, '全 0 应返回空盘列表');
 
-// ---------- distributeToQueues：列数不超过上限、盘子不丢、尽量均分、按颜色排序 ----------
+// ---------- distributeToQueues：列数不超过上限、盘子不丢、尽量均分、同色内大容量在前 ----------
 {
   const counts = new Array(11).fill(0);
-  counts[C_RED] = 20000;                       // → 2400×8 + 800 = 9 盘
+  counts[C_RED] = 20000;                       // → 2400×8 + 600 + 200 = 10 盘
   const plates = splitPlates(counts);
   const q = distributeToQueues(plates, MAX_QUEUE_COLS);
-  assert.strictEqual(q.length, MAX_QUEUE_COLS, '应分成 5 列');
+  assert.strictEqual(q.length, MAX_QUEUE_COLS, `应分成 ${MAX_QUEUE_COLS} 列`);
   const total = q.reduce((s, c) => s + c.length, 0);
   assert.strictEqual(total, plates.length, '分配后盘子总数不应变化');
   const lens = q.map(c => c.length);
@@ -502,6 +502,38 @@ assert.strictEqual(splitPlates(new Array(11).fill(0)).length, 0, '全 0 应返�
   b.setSlotCount(2);
   assert.strictEqual(b.n, 10, '目标槽位数装不下现有盘子时应拒绝');
   assert.strictEqual(b.count(), 3, '拒绝后盘子仍在');
+}
+
+// ---------- distributeToQueues：同色不应在一列里连成一片 ----------
+// 旧实现是"按颜色排序后连续分块"，每列就是一个连续色段（实测第 5 列整列 12 个全同色），
+// 玩家能背出"红色在第 3 列"，可玩性低。现在改成按颜色轮流取。
+// 注意不能断言"最长连续段"——最后剩余的大颜色组会落在序列尾部（实测尾部 8 个同色），
+// 所以改断言"色段总数"，它才反映整体打散程度。
+{
+  const counts = new Array(11).fill(0);
+  for (let c = 0; c < 11; c++) counts[c] = 6000;   // 每色 3 盘
+  const plates = splitPlates(counts);
+  const q = distributeToQueues(plates, MAX_QUEUE_COLS);
+
+  let runs = 0;
+  for (const col of q) {
+    if (col.length === 0) continue;
+    runs++;
+    for (let k = 1; k < col.length; k++) if (col[k].color !== col[k - 1].color) runs++;
+  }
+  assert.ok(runs >= plates.length * 0.6,
+    `色段总数应 >= 盘子数的 60%（说明同色已打散），实测 ${runs}/${plates.length}`);
+}
+
+// ---------- distributeToQueues：颜色顺序随机，不应每次都从同一个色开头 ----------
+{
+  const counts = new Array(11).fill(0);
+  for (let c = 0; c < 11; c++) counts[c] = 6000;
+  const plates = splitPlates(counts);
+  const heads = new Set();
+  for (let k = 0; k < 20; k++) heads.add(distributeToQueues(plates, MAX_QUEUE_COLS)[0][0].color);
+  assert.ok(heads.size >= 5,
+    `首列第一个盘子不应总是同一个颜色，实测 20 次里出现 ${heads.size} 种`);
 }
 
 console.log('全部断言通过');

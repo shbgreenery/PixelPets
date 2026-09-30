@@ -30,24 +30,51 @@ canvas {
 'use strict';
 
 // ============ 布局常量 ============
+// 画布 600×1130。手机缩放系数由屏宽决定（390/600 = 0.65），
+// 所以总高必须 <= 可见高度 / 0.65 ≈ 1150，各区块的高度都卡着这个预算分配。
 const CANVAS_W = SAND_W;                 // 600
-const CANVAS_H = 1100;
-const TOP_MARGIN = 0;
+const CANVAS_H = 1130;
+const FRAME = 8;                         // 沙盘外框厚度
 const PLATE_R = 30;                      // 盘子半径
 // 传送带：盘子沿直线带循环移动，只有移到某颗沙粒正下方（左右容差内）才能吸走它
-const BELT_Y = SAND_H + 12;              // 带顶 y = 812
-const BELT_H = 76;                       // 带高
-const BELT_CY = BELT_Y + BELT_H / 2;     // 盘子圆心 y = 850
-const SLOT = 56;                         // 队列槽位边长
-const QUEUE_Y = SAND_H + 90;             // 队列起始 y = 890
-const BTN_Y = CANVAS_H - 50;             // 按钮行 y = 1050
+const BELT_Y = SAND_H + FRAME * 2 + 10;  // 带顶
+const BELT_H = 72;                       // 带高
+const BELT_CY = BELT_Y + BELT_H / 2;     // 盘子圆心
+const BELT_ARROW = 34;                   // 两端方向箭头块宽度
+// 队列：网格布局，一屏显示 4 列 × 5 行 = 20 个（参考同类游戏）
+const QCOLS = 4;                         // 列数上限
+const QROWS = 5;                         // 每列显示几行
+const SLOT = 48;                         // 槽位边长
+const SLOT_GAP = 6;
+const QUEUE_Y = BELT_Y + BELT_H + 14;    // 队列起始 y
+const BTN_Y = CANVAS_H - 52;             // 按钮行 y
 
 // 调色板 → 预打包的 RGBA（小端序 ABGR）
 const PAL_PIX = SAND_PALETTE.map(c => (255 << 24) | ((c.hex & 0xFF) << 16) | (((c.hex >> 8) & 0xFF) << 8) | ((c.hex >> 16) & 0xFF));
 const PAL_CSS = SAND_PALETTE.map(c => '#' + c.hex.toString(16).padStart(6, '0'));
-// 空格 = 沙盘背景色。必须同时远离调色板里的白(#F4F7FA)和黑(#1A1A1A)：
-// 实测 #e8e8e8 与白色的 ΔE 只有 5.4（肉眼不可分辨），换成 #6b727a 后最小 ΔE = 37.2。
 const EMPTY_PIX = 0xFF7A726B;            // #6b727a 小端序 ABGR
+
+// ---------- 描边与沙粒质感 ----------
+// 参考同类沙画消除游戏：所有色块都带一圈粗黑描边，画面立刻从"色块拼接"变成"手绘插画"；
+// 平涂区域里同色系的深浅颗粒混排，远看是纯色、近看是沙粒。
+// 两者都是【渲染期效果】，不参与沙盘模拟 —— 沙粒移动时描边会自动跟着新轮廓重算。
+const OUTLINE_PIX = 0xFF1A1A1A;          // 描边色（#1A1A1A）
+const SHADE_LEVELS = [0.935, 0.975, 1.015, 1.055];   // 4 档亮度扰动，±6% 以内
+const PAL_SHADES = SAND_PALETTE.map(c => SHADE_LEVELS.map(f => {
+  const r = Math.min(255, Math.round(((c.hex >> 16) & 0xFF) * f));
+  const g = Math.min(255, Math.round(((c.hex >> 8) & 0xFF) * f));
+  const b = Math.min(255, Math.round((c.hex & 0xFF) * f));
+  return (255 << 24) | (b << 16) | (g << 8) | r;
+}));
+// 每格的颗粒档位（0~3），坐标哈希生成，不需要额外状态
+const NOISE_LV = new Uint8Array(SAND_COLS * SAND_ROWS);
+{
+  let s = 20260930 >>> 0;
+  for (let i = 0; i < NOISE_LV.length; i++) {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    NOISE_LV[i] = s >>> 30;
+  }
+}
 
 const UI_SCALE = (typeof window !== 'undefined' && 'ontouchstart' in window) ? 1.4 : 1;
 
@@ -81,7 +108,7 @@ class GameScene extends Phaser.Scene {
     this.bufImg = this.bufCtx.createImageData(SAND_COLS, SAND_ROWS);
     this.bufPix = new Uint32Array(this.bufImg.data.buffer);
 
-    this.sandImg = this.add.image(0, TOP_MARGIN, 'sand').setOrigin(0, 0).setDepth(0);
+    this.sandImg = this.add.image(0, 0, 'sand').setOrigin(0, 0).setDepth(0);
 
     // ---------- 顶部中央：已消除沙粒计数 ----------
     // 沙盘任意颜色都可能出现在顶部，所以用半透明深色胶囊底 + 白字描边保证可读。
@@ -106,6 +133,7 @@ class GameScene extends Phaser.Scene {
     // ---------- 图形层 ----------
     this.beltGfx = this.add.graphics().setDepth(1);    // 传送带带体
     this.plateGfx = this.add.graphics().setDepth(2);   // 带上的盘子
+    this.frameGfx = this.add.graphics().setDepth(3);   // 沙盘外框（压在沙盘边缘上）
     this.queueGfx = this.add.graphics().setDepth(1);
     this.drainGfx = this.add.graphics().setDepth(2);
     this.flyGfx = this.add.graphics().setDepth(4);     // 飞向盘子的沙粒
@@ -125,7 +153,7 @@ class GameScene extends Phaser.Scene {
     }
     // 队列槽位数字
     this.queueLabels = [];
-    for (let i = 0; i < MAX_QUEUE_COLS * 2; i++) {
+    for (let i = 0; i < QCOLS * QROWS; i++) {
       this.queueLabels.push(this.add.text(0, 0, '', {
         fontSize: Math.round(14 * UI_SCALE) + 'px', color: '#ffffff',
         fontFamily: 'monospace', fontStyle: 'bold',
@@ -139,6 +167,11 @@ class GameScene extends Phaser.Scene {
       .setDepth(5).on('pointerdown', () => this.startRound());
     this.btnAddSlot = this.makeIconButton(170 * UI_SCALE, BTN_Y, 20 * UI_SCALE, 0x9b59b6, 'plus')
       .setDepth(5).on('pointerdown', () => this.onAddSlot());
+    // 盘位计数器：显示"已用/总数"，跟 + 按钮配套（参考同类游戏的 0/6 +）
+    this.slotLabel = this.add.text(170 * UI_SCALE + 30 * UI_SCALE, BTN_Y, '', {
+      fontSize: Math.round(16 * UI_SCALE) + 'px', color: '#ffffff',
+      fontFamily: 'sans-serif', fontStyle: 'bold',
+    }).setOrigin(0, 0.5).setDepth(5).setStroke('#2c3e50', 3);
     this.btnSpeed = this.makeIconButton(CANVAS_W - 50 * UI_SCALE, BTN_Y, 20 * UI_SCALE, 0x3498db, 'speed')
       .setDepth(5).on('pointerdown', () => this.onSpeed());
     this.speedLabel = this.btnSpeed.getAt(2);
@@ -233,12 +266,28 @@ class GameScene extends Phaser.Scene {
   }
 
   // ============ 沙盘渲染 ============
+  // 每个格子要判断四邻是否异色来决定描边，所以这里用二维循环而不是单层遍历。
   renderSand() {
     const cells = this.grid.cells;
     const pix = this.bufPix;
-    for (let i = 0; i < cells.length; i++) {
-      const v = cells[i];
-      pix[i] = v < 0 ? EMPTY_PIX : PAL_PIX[v];
+    const W = SAND_COLS, H = SAND_ROWS;
+    for (let y = 0; y < H; y++) {
+      const base = y * W;
+      for (let x = 0; x < W; x++) {
+        const i = base + x;
+        const v = cells[i];
+        if (v < 0) { pix[i] = EMPTY_PIX; continue; }
+        // 描边：四邻有异色（含空）就画黑边。
+        // 越界方向当作同色处理，否则画面四条边会被描一整圈。
+        if ((y > 0 && cells[i - W] !== v) ||
+            (y < H - 1 && cells[i + W] !== v) ||
+            (x > 0 && cells[i - 1] !== v) ||
+            (x < W - 1 && cells[i + 1] !== v)) {
+          pix[i] = OUTLINE_PIX;
+          continue;
+        }
+        pix[i] = PAL_SHADES[v][NOISE_LV[i]];
+      }
     }
     this.bufCtx.putImageData(this.bufImg, 0, 0);
     const ctx = this.sandTexCtx;
@@ -362,6 +411,15 @@ class GameScene extends Phaser.Scene {
 
   // ============ 绘制 UI ============
   draw() {
+    // ---------- 沙盘外框：粗黑边，把图案和 UI 拉开层次（参考同类游戏的画框） ----------
+    const frameG = this.frameGfx;
+    frameG.clear();
+    frameG.fillStyle(0x1a1a1a, 1);
+    frameG.fillRect(0, 0, SAND_W, FRAME);
+    frameG.fillRect(0, SAND_H - FRAME, SAND_W, FRAME);
+    frameG.fillRect(0, 0, FRAME, SAND_H);
+    frameG.fillRect(SAND_W - FRAME, 0, FRAME, SAND_H);
+
     // 取料区示意（底部十行）
     const drainH = DRAIN_ROWS * CELL_PX;
     const dg = this.drainGfx;
@@ -380,11 +438,26 @@ class GameScene extends Phaser.Scene {
     const markW = 12, span = 34;
     const off = this.belt.offset % span;
     bg.fillStyle(this.fastMode ? 0xc98a2a : 0x545d69, 1);
-    for (let x = -span; x < SAND_W + span; x += span) {
-      const mx = x + off;
-      if (mx > -markW && mx < SAND_W) bg.fillRect(mx, BELT_Y + 5, markW, BELT_H - 10);
+    for (let x = BELT_ARROW; x < SAND_W - BELT_ARROW; x += span) {
+      const mx = x + off % span;
+      if (mx > BELT_ARROW && mx < SAND_W - BELT_ARROW) bg.fillRect(mx, BELT_Y + 5, markW, BELT_H - 10);
+    }
+    // 两端的 > 方向块：明确指示带往右走（参考同类游戏的做法）
+    bg.fillStyle(0x262c34, 1);
+    bg.fillRect(0, BELT_Y, BELT_ARROW, BELT_H);
+    bg.fillRect(SAND_W - BELT_ARROW, BELT_Y, BELT_ARROW, BELT_H);
+    bg.lineStyle(2, 0x4a525c, 1);
+    for (const bx of [0, SAND_W - BELT_ARROW]) bg.strokeRect(bx + 1, BELT_Y + 1, BELT_ARROW - 2, BELT_H - 2);
+    bg.lineStyle(6, 0x8a929c, 1);
+    for (const bx of [BELT_ARROW / 2, SAND_W - BELT_ARROW / 2]) {
+      bg.beginPath();
+      bg.moveTo(bx - 6, BELT_CY - 11);
+      bg.lineTo(bx + 6, BELT_CY);
+      bg.lineTo(bx - 6, BELT_CY + 11);
+      bg.strokePath();
     }
     this.fastLabel.setVisible(this.fastMode);
+    this.slotLabel.setText(this.belt.count() + '/' + this.belt.n);
     // 盘位已满上限时把"加盘位"按钮变暗
     this.btnAddSlot.setAlpha(this.belt.n >= MAX_PLATE_SLOTS ? 0.35 : 1);
 
@@ -424,8 +497,8 @@ class GameScene extends Phaser.Scene {
     for (let ci = 0; ci < nCols; ci++) {
       const col = this.queues[ci];
       const x = ci * colW + colW / 2 - SLOT / 2;
-      for (let si = 0; si < 2; si++) {
-        const y = QUEUE_Y + si * (SLOT + 6);
+      for (let si = 0; si < QROWS; si++) {
+        const y = QUEUE_Y + si * (SLOT + SLOT_GAP);
         const p = col[si];
         const lbl = this.queueLabels[li++];
         if (p) {
@@ -463,7 +536,7 @@ class GameScene extends Phaser.Scene {
   onPointerDown(pointer) {
     if (!this.running || this.dialogShown) return;
     const x = pointer.x, y = pointer.y;
-    if (y < QUEUE_Y - 24 || y > QUEUE_Y + 2 * (SLOT + 6)) return;
+    if (y < QUEUE_Y - 20 || y > QUEUE_Y + QROWS * (SLOT + SLOT_GAP)) return;
     const nCols = this.queues.length;
     const colW = CANVAS_W / nCols;
     const ci = Math.floor(x / colW);
