@@ -522,13 +522,14 @@ class Belt {
     return best;
   }
 
-  // 已有同色盘子的槽位下标；没有返回 -1
-  firstSameColor(color) {
+  // 某色在带上占用的槽位下标列表
+  colorSlots(color) {
+    const out = [];
     for (let i = 0; i < this.n; i++) {
       const p = this.slots[i];
-      if (p && p.color === color) return i;
+      if (p && p.color === color) out.push(i);
     }
-    return -1;
+    return out;
   }
 
   // 改变槽位数：保住已在带上的盘子，并把它们【等间距摊开】。

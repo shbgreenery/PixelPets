@@ -466,12 +466,15 @@ assert.strictEqual(splitPlates(new Array(11).fill(0)).length, 0, '全 0 应返�
   assert.deepStrictEqual(b10.slotColumns(9, cellPx), [0, 0], '屏幕外的槽位应返回空列区间');
 }
 
-// ---------- Belt：firstSameColor ----------
+// ---------- Belt：colorSlots 按颜色找槽位 ----------
 {
   const b = new Belt(600, 6);
-  b.slots[3] = { color: C_BLUE };
-  assert.strictEqual(b.firstSameColor(C_BLUE), 3, '应找到同色盘子的槽位');
-  assert.strictEqual(b.firstSameColor(C_GREEN), -1, '没有同色时应返回 -1');
+  b.slots[1] = { color: C_BLUE };
+  b.slots[4] = { color: C_BLUE };
+  b.slots[3] = { color: C_GREEN };
+  assert.deepStrictEqual(b.colorSlots(C_BLUE), [1, 4], '应返回该色占用的全部槽位');
+  assert.deepStrictEqual(b.colorSlots(C_GREEN), [3], '单槽位也应正确返回');
+  assert.deepStrictEqual(b.colorSlots(C_RED), [], '没有该色时应返回空数组');
 }
 
 // ---------- Belt：setSlotCount 保住盘子、等间距摊开、并重算带长 ----------

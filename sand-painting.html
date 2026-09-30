@@ -476,25 +476,36 @@ class GameScene extends Phaser.Scene {
     if (!col || col.length === 0) return;
     const colW = CANVAS_W / this.queues.length;
 
-    // 同色合并优先（带上已有该色盘子 → 数量并入），否则放到离该队列最近的空槽位
-    let slot = this.belt.firstSameColor(col[0].color);
-    if (slot < 0) slot = this.belt.nearestEmpty(ci * colW + colW / 2);
-    if (slot < 0) return;                       // 8 个槽位全满
+    // 默认放到离该队列最近的空槽位 —— 不再一有同色就合并。
+    // 同色多占几个盘子能同时覆盖多段列，那一色的清除速度会成倍提升。
+    const slot = this.belt.nearestEmpty(ci * colW + colW / 2);
+    if (slot < 0) return;                       // 没有空位，点了也没用
 
     const plate = col.shift();
     this.usedPlates++;
-    const existing = this.belt.slots[slot];
-    if (existing) {
-      existing.remaining += plate.remaining;
-      existing.capacity += plate.capacity;
-    } else {
-      plate.active = true;
-      this.belt.slots[slot] = plate;
-    }
+    plate.active = true;
+    this.belt.slots[slot] = plate;
+
+    // 同色占到 3 个盘子才合并成 1 个（数量求和），释放出 2 个空位
+    this.mergeTriples(plate.color);
 
     // 某列被点空 → 只丢掉那一列，其余各列内容不动（列间距由 draw() 按新列数重算）
     if (col.length === 0) this.queues = rebalanceQueues(this.queues);
     this.draw();
+  }
+
+  // 某色在带上占到 3 个盘子时，合并成 1 个并腾出另外 2 个槽位。
+  // 保留最先放下的那个（索引最小的），其余的数量与容量并入它。
+  mergeTriples(color) {
+    const idx = this.belt.colorSlots(color);
+    if (idx.length < 3) return;
+    const keep = idx[0];
+    for (let k = 1; k < idx.length; k++) {
+      const p = this.belt.slots[idx[k]];
+      this.belt.slots[keep].remaining += p.remaining;
+      this.belt.slots[keep].capacity += p.capacity;
+      this.belt.slots[idx[k]] = null;
+    }
   }
 
   onShuffle() {
