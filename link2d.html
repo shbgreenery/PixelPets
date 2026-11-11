@@ -49,10 +49,18 @@
   <button id="next">下一局</button>
 </div>
 <div id="game"></div>
-<script src="https://cdn.jsdelivr.net/npm/phaser@4.2.1/dist/phaser.min.js" integrity="sha384-kyUQ5+cxc6+X89xEG6DhcXLcDU9T3Z+o/45VdT6pgAwtG6gxtAzYTEn0Wwj/BKZd" crossorigin="anonymous"></script>
+<script src="assets/vendor/phaser-4.2.1.min.js"></script>
+<script src="level-kit.js"></script>
 <script src="link2d-core.js"></script>
 <script>
-const EMOJIS = ['🍎', '🍌', '🍇', '🍉', '🍊', '🍓', '🍑', '🍒', '🐱', '🐶', '🐰', '🐻', '🦊', '🐼', '🐨', '🐯', '🐸', '🐵', '🦁', '🐮', '🐷', '🐭', '🐹', '🐔', '🦄', '🐝', '🦋', '🐢', '🐙', '🦀', '🐬', '🐳', '🦜', '🦚', '🌵', '🌲', '🌸', '🌺', '🍄', '🍀', '⭐', '🌙', '☀️', '🌈', '⚽', '🏀', '🎈', '🎁', '🔔', '🎵', '🍕', '🍔', '🍦', '🍩', '🍪', '🎂', '🧁', '🍭', '🍬', '🍫', '🥨', '🥞', '🧀', '🥝'];
+'use strict';
+// ============ 关卡 ============
+const GAME_ID = 'link2d';
+const URL_LEVEL = getLevelFromUrl();
+// 有 ?level=N 时固定种子；同一关每次重开都是同一副牌
+function makeRng() {
+  return URL_LEVEL ? levelRng(levelHash(GAME_ID, URL_LEVEL)) : Math.random;
+}
 
 const EFFECTS = ['up', 'down', 'left', 'right', 'lr-spread', 'ud-spread', 'scatter', 'gather', 'none'];
 let CELL = 40;   // 每个方块像素（startGame 时按视口动态算）
@@ -84,16 +92,18 @@ function playEliminateSound() {
   o.start(t); o.stop(t + 0.18);
 }
 
-// 随机选择 emoji 数组子集，返回前 n 个（每种图案 4 个 → 需 N*N/4 种）
-function pickEmojis(n) {
-  const arr = EMOJIS.slice();
+// 本地图案（Kenney 棋子，1..64）。64 种足够 16×16 棋盘使用。
+const PATTERN_COUNT = 64;
+function pickPatterns(n, rng) {
+  rng = rng || Math.random;
+  const arr = Array.from({ length: PATTERN_COUNT }, (_, i) => i + 1);
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr.slice(0, n);
 }
-let emojiList = pickEmojis(64); // 足够 16x16，下一局时重新抽取刷新图案
+let patternOrder = pickPatterns(PATTERN_COUNT);
 
 // 网格坐标 -> 像素坐标（方块中心）
 function toPX(x, y) { return { x: PAD + x * CELL + CELL / 2, y: PAD + y * CELL + CELL / 2 }; }
@@ -112,13 +122,11 @@ function computeSize(N) {
 
 class GameScene extends Phaser.Scene {
   preload() {
-    // 加载全部 64 个 emoji 的 SVG（Noto Emoji，彩色立体风格）
-    EMOJIS.forEach(emoji => {
-      const codepoint = emoji.codePointAt(0).toString(16);
-      this.load.svg(`emoji_${codepoint}`,
-        `https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@main/svg/emoji_u${codepoint}.svg`,
-        { width: 128, height: 128 });
-    });
+    // 全部图案来自本地 Kenney 素材，不再依赖 CDN
+    for (let i = 1; i <= PATTERN_COUNT; i++) {
+      const file = String(i).padStart(2, '0');
+      this.load.image(`pattern_${i}`, `assets/kenney/pieces/${file}.png`);
+    }
   }
 
   create() {
@@ -153,11 +161,9 @@ class GameScene extends Phaser.Scene {
         const container = this.add.container(p.x, p.y);
         // 白色背景块（中心在 container 内 (0,0)）
         const bg = this.add.rectangle(0, 0, CELL * 0.92, CELL * 0.92, 0xffffff);
-        // emoji 图片（中心在 container 内 (0,0)）
-        const emoji = emojiList[t - 1];
-        const codepoint = emoji.codePointAt(0).toString(16);
-        const img = this.add.image(0, 0, `emoji_${codepoint}`)
-          .setDisplaySize(CELL * 0.8, CELL * 0.8)
+        // 本地图案（中心在 container 内 (0,0)）
+        const img = this.add.image(0, 0, `pattern_${patternOrder[t - 1]}`)
+          .setDisplaySize(CELL * 0.74, CELL * 0.74)
           .setInteractive();
         container.add([bg, img]);
         container.userData = { x, y, type: t };
@@ -227,6 +233,7 @@ class GameScene extends Phaser.Scene {
   // 消除后触发物效：核心层先算出移动映射，渲染层据映射做 tween 动画
   afterEliminate() {
     if (game.remaining === 0) {
+      if (URL_LEVEL) unlockLevel(GAME_ID, URL_LEVEL + 1);   // 通关解锁下一关
       document.getElementById('win-panel').classList.remove('hidden');
       return;
     }
@@ -278,9 +285,10 @@ class GameScene extends Phaser.Scene {
   // 下一局：尺寸 N 不变，刷新物效与图案，重置提示次数
   restartRound() {
     document.getElementById('win-panel').classList.add('hidden');
-    game = new Link2D(N, N);
-    effect = EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
-    emojiList = pickEmojis(64);
+    const rng = makeRng();
+    game = new Link2D(N, N, rng);
+    effect = EFFECTS[Math.floor(rng() * EFFECTS.length)];
+    patternOrder = pickPatterns(PATTERN_COUNT, rng);
     hintLeft = 3;
     this.hintBtn.textContent = `提示(${hintLeft})`;
     this.clearTiles();
@@ -297,11 +305,13 @@ class GameScene extends Phaser.Scene {
 
 function startGame(size) {
   N = size;
-  game = new Link2D(N, N);
-  effect = EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+  const rng = makeRng();
+  game = new Link2D(N, N, rng);
+  effect = EFFECTS[Math.floor(rng() * EFFECTS.length)];
+  patternOrder = pickPatterns(PATTERN_COUNT, rng);
   document.getElementById('size-panel').classList.add('hidden');
   const { width, height } = computeSize(N);
-  new Phaser.Game({
+  window.__GAME = new Phaser.Game({
     type: Phaser.AUTO,
     width,
     height,
@@ -312,9 +322,14 @@ function startGame(size) {
   });
 }
 
-document.querySelectorAll('#size-panel button').forEach(btn => {
-  btn.addEventListener('click', () => startGame(parseInt(btn.dataset.size, 10)));
-});
+if (URL_LEVEL) {
+  // 从关卡页进来：跳过尺寸选择，固定 8×8，种子决定牌面
+  startGame(8);
+} else {
+  document.querySelectorAll('#size-panel button').forEach(btn => {
+    btn.addEventListener('click', () => startGame(parseInt(btn.dataset.size, 10)));
+  });
+}
 </script>
 </body>
 </html>

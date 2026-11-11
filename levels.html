@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>选择关卡 · PixelPets</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: #fff;
+  padding: 32px 20px 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+header {
+  width: 100%;
+  max-width: 960px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.back {
+  color: rgba(255,255,255,0.85);
+  text-decoration: none;
+  font-size: 1rem;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.14);
+  border: 1px solid rgba(255,255,255,0.22);
+}
+.back:hover { background: rgba(255,255,255,0.24); }
+h1 { font-size: 2rem; font-weight: 800; letter-spacing: 1px; }
+.sub {
+  width: 100%;
+  max-width: 960px;
+  opacity: 0.8;
+  font-size: 0.92rem;
+  margin: 6px 0 28px;
+}
+.levels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 16px;
+  width: 100%;
+  max-width: 960px;
+}
+.level {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #fff;
+  text-decoration: none;
+  border-radius: 18px;
+  background: rgba(255,255,255,0.16);
+  border: 1px solid rgba(255,255,255,0.26);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: transform 0.16s, background 0.16s, box-shadow 0.16s;
+}
+.level:hover {
+  transform: translateY(-5px);
+  background: rgba(255,255,255,0.28);
+  box-shadow: 0 12px 26px rgba(0,0,0,0.22);
+}
+.level.current {
+  background: rgba(255,255,255,0.34);
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.45) inset;
+}
+.games {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px;
+  width: 100%;
+  max-width: 960px;
+}
+.game {
+  display: block;
+  padding: 22px 20px;
+  border-radius: 18px;
+  background: rgba(255,255,255,0.16);
+  border: 1px solid rgba(255,255,255,0.26);
+  color: #fff;
+  text-decoration: none;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.game:hover { background: rgba(255,255,255,0.26); }
+.game small { display: block; margin-top: 6px; font-weight: 400; opacity: 0.75; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="index.html">← 返回</a>
+  <h1 id="title">选择关卡</h1>
+</header>
+<div class="sub" id="sub"></div>
+<div id="content"></div>
+
+<script src="level-kit.js"></script>
+<script>
+'use strict';
+
+const gameId = new URLSearchParams(location.search).get('game');
+const game = gameId ? LEVEL_GAMES[gameId] : null;
+const content = document.getElementById('content');
+
+if (!game) {
+  // 未指定游戏：列出所有游戏，点进去再选关卡
+  document.getElementById('title').textContent = '选择游戏';
+  document.getElementById('sub').textContent = '每个游戏都有独立的关卡进度';
+  const box = document.createElement('div');
+  box.className = 'games';
+  for (const [id, g] of Object.entries(LEVEL_GAMES)) {
+    const a = document.createElement('a');
+    a.className = 'game';
+    a.href = 'levels.html?game=' + id;
+    const max = getMaxLevel(id);
+    a.innerHTML = g.name + '<small>已解锁 ' + max + ' 关</small>';
+    box.appendChild(a);
+  }
+  content.appendChild(box);
+} else {
+  document.title = game.name + ' · 选择关卡 · PixelPets';
+  document.getElementById('title').textContent = game.name;
+  const max = getMaxLevel(gameId);
+  document.getElementById('sub').textContent = '只能进入已解锁的关卡（当前最高第 ' + max + ' 关）';
+
+  const box = document.createElement('div');
+  box.className = 'levels';
+  for (let lv = 1; lv <= max; lv++) {
+    const a = document.createElement('a');
+    a.className = 'level' + (lv === max ? ' current' : '');
+    a.href = game.file + '?level=' + lv;
+    a.textContent = lv;
+    box.appendChild(a);
+  }
+  content.appendChild(box);
+}
+</script>
+</body>
+</html>

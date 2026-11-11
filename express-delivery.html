@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>快递哪去了？</title>
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <script src="assets/vendor/phaser-3.60.0.min.js"></script>
     <style>
         body { margin: 0; background-color: #2c3e50; display: flex; flex-direction: column; align-items: center; font-family: 'Microsoft YaHei', sans-serif; user-select: none; padding-top: 20px; }
         .game-title { color: #f39c12; font-size: 36px; font-weight: 900; margin: 0 0 15px 0; text-shadow: 2px 2px 0px #d35400, 4px 4px 0px #000; letter-spacing: 4px; }
@@ -49,7 +49,15 @@
 
 <div id="game-container"></div>
 
+<script src="level-kit.js"></script>
 <script>
+// ============ 关卡 ============
+const GAME_ID = 'express-delivery';
+const URL_LEVEL = getLevelFromUrl();
+let RAND = URL_LEVEL ? levelRng(levelHash(GAME_ID, URL_LEVEL)) : Math.random;
+function rand() { return RAND(); }
+// 每次重开都从头跑随机序列：同一关的快递位置和区域扩散完全一致
+function resetRng() { RAND = URL_LEVEL ? levelRng(levelHash(GAME_ID, URL_LEVEL)) : Math.random; }
 const SIZE = 10;
 
 // 生成满足「每行/列各一个、8 方向不相邻」的快递位置
@@ -64,7 +72,7 @@ function findStars() {
     };
     const solve = (row) => {
         if (row === SIZE) return true;
-        const cols = [...Array(SIZE).keys()].sort(() => Math.random() - 0.5);
+        const cols = [...Array(SIZE).keys()].sort(() => rand() - 0.5);
         for (const col of cols) {
             if (safe(row, col)) {
                 board[row] = col;
@@ -87,7 +95,7 @@ function genRegionsChain(stars) {
     const visited = new Array(n).fill(false);
     const order = [];
     // 启动孤点（不扩散，作为推理锚点）
-    let cur = Math.floor(Math.random() * n);
+    let cur = Math.floor(rand() * n);
     order.push(cur); visited[cur] = true;
     const [r0, c0] = stars[cur];
     region[r0][c0] = cur;
@@ -113,7 +121,7 @@ function genRegionsChain(stars) {
             if (adj) candidates.push(i);
         }
         let next;
-        if (candidates.length) next = candidates[Math.floor(Math.random() * candidates.length)];
+        if (candidates.length) next = candidates[Math.floor(rand() * candidates.length)];
         else { for (let i = 0; i < n; i++) if (!visited[i]) { next = i; break; } }
         order.push(next); visited[next] = true;
         cur = next;
@@ -289,6 +297,7 @@ class MainScene extends Phaser.Scene {
     }
 
     create() {
+        resetRng();
         this.errors = 0; this.found = 0; this.isGameOver = false;
         this.isDragging = false; this.dragMode = null; this.dragAxis = null;
         this.startGridX = -1; this.startGridY = -1;
@@ -401,7 +410,10 @@ class MainScene extends Phaser.Scene {
         }
         else { cell.failMark.setVisible(true); cell.errorBorder.setVisible(true); this.errors++; }
         this.updateStats();
-        if (this.found === 10) this.showEnd("恭喜你找到了所有的快递！", 0x2ecc71);
+        if (this.found === 10) {
+            if (URL_LEVEL) unlockLevel(GAME_ID, URL_LEVEL + 1);
+            this.showEnd("恭喜你找到了所有的快递！", 0x2ecc71);
+        }
         else if (this.errors >= 3) this.showEnd("任务失败：快递丢了！", 0xe74c3c);
     }
 

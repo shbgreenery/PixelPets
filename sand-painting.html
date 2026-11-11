@@ -24,7 +24,8 @@ canvas {
 </head>
 <body>
 <div id="game"></div>
-<script src="https://cdn.jsdelivr.net/npm/phaser@4.2.1/dist/phaser.min.js" integrity="sha384-kyUQ5+cxc6+X89xEG6DhcXLcDU9T3Z+o/45VdT6pgAwtG6gxtAzYTEn0Wwj/BKZd" crossorigin="anonymous"></script>
+<script src="assets/vendor/phaser-4.2.1.min.js"></script>
+<script src="level-kit.js"></script>
 <script src="sand-core.js"></script>
 <script>
 'use strict';
@@ -32,7 +33,8 @@ canvas {
 // ============ 布局常量 ============
 // 画布 600×1130。手机缩放系数由屏宽决定（390/600 = 0.65），
 // 所以总高必须 <= 可见高度 / 0.65 ≈ 1150，各区块的高度都卡着这个预算分配。
-const CANVAS_W = SAND_W;                 // 600
+const SAND_X = 20;                       // 沙盘左右留白（外框宽度）
+const CANVAS_W = SAND_W + SAND_X * 2;    // 640
 const CANVAS_H = 1130;
 const FRAME = 8;                         // 沙盘外框厚度
 const PLATE_R = 30;                      // 盘子半径
@@ -44,8 +46,12 @@ const BELT_ARROW = 34;                   // 两端方向箭头块宽度
 // 队列：网格布局，一屏显示 4 列 × 5 行 = 20 个（参考同类游戏）
 const QCOLS = 4;                         // 列数上限
 const QROWS = 5;                         // 每列显示几行
-const SLOT = 48;                         // 槽位边长
-const SLOT_GAP = 6;
+const SLOT_H = 48;                       // 槽位高
+const SLOT_GAP = 5;                      // 行距
+const QUEUE_MARGIN = 10;                 // 队列内容区左右边距
+const QUEUE_GAP = 4;                     // 列间距
+const QUEUE_PAD = 8;                     // 队列容器上下内边距
+const QUEUE_H = QROWS * SLOT_H + (QROWS - 1) * SLOT_GAP;   // 队列内容区总高
 const QUEUE_Y = BELT_Y + BELT_H + 14;    // 队列起始 y
 const BTN_Y = CANVAS_H - 52;             // 按钮行 y
 
@@ -54,11 +60,11 @@ const PAL_PIX = SAND_PALETTE.map(c => (255 << 24) | ((c.hex & 0xFF) << 16) | (((
 const PAL_CSS = SAND_PALETTE.map(c => '#' + c.hex.toString(16).padStart(6, '0'));
 const EMPTY_PIX = 0xFF7A726B;            // #6b727a 小端序 ABGR
 
-// ---------- 描边与沙粒质感 ----------
-// 参考同类沙画消除游戏：所有色块都带一圈粗黑描边，画面立刻从"色块拼接"变成"手绘插画"；
+// ---------- 沙粒质感 ----------
 // 平涂区域里同色系的深浅颗粒混排，远看是纯色、近看是沙粒。
-// 两者都是【渲染期效果】，不参与沙盘模拟 —— 沙粒移动时描边会自动跟着新轮廓重算。
-const OUTLINE_PIX = 0xFF1A1A1A;          // 描边色（#1A1A1A）
+// 这是【渲染期效果】，不参与沙盘模拟。
+// 不再给色块描黑边：描边按整格着色，色块被吸到只剩单格时会被整块吞成黑色，
+// 后期沙盘只剩黑边看不到颜色。
 const SHADE_LEVELS = [0.935, 0.975, 1.015, 1.055];   // 4 档亮度扰动，±6% 以内
 const PAL_SHADES = SAND_PALETTE.map(c => SHADE_LEVELS.map(f => {
   const r = Math.min(255, Math.round(((c.hex >> 16) & 0xFF) * f));
@@ -91,11 +97,36 @@ const FLY_SAMPLE = 6;        // 每吸走 6 颗才画 1 颗：1600/秒 → 267/�
 const FLY_MAX = 200;         // 同时在飞的沙粒上限
 const FLY_SIZE = 9;          // 沙粒绘制边长（画布像素）
 
+// ============ 关卡 ============
+const GAME_ID = 'sand-painting';
+const LEVELS_PER_PAGE = 20;              // 关卡选择每页 5 列 × 4 行
+const LEVEL_COLS = 5;
+
+// 调色板 RGB + 最近色查找：把 Kenney 图片的像素量化到 11 色调色板。
+const PAL_RGB = SAND_PALETTE.map(c => [(c.hex >> 16) & 0xFF, (c.hex >> 8) & 0xFF, c.hex & 0xFF]);
+function nearestPalette(r, g, b) {
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < PAL_RGB.length; i++) {
+    const p = PAL_RGB[i];
+    const dr = r - p[0], dg = g - p[1], db = b - p[2];
+    const d = dr * dr + dg * dg + db * db;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+
 // ============ 游戏状态（跨场景，供 update 读取） ============
 let speedMultiplier = 1;
 
 class GameScene extends Phaser.Scene {
   constructor() { super({ key: 'GameScene' }); }
+
+  // 动物图全部来自本地 Kenney 素材，30 张合计约 130KB。
+  preload() {
+    for (const name of LEVEL_ANIMALS) {
+      this.load.image('animal_' + name, 'assets/kenney/animals/' + name + '.png');
+    }
+  }
 
   create() {
     // ---------- 沙盘离屏缓冲 ----------
@@ -108,7 +139,19 @@ class GameScene extends Phaser.Scene {
     this.bufImg = this.bufCtx.createImageData(SAND_COLS, SAND_ROWS);
     this.bufPix = new Uint32Array(this.bufImg.data.buffer);
 
-    this.sandImg = this.add.image(0, 0, 'sand').setOrigin(0, 0).setDepth(0);
+    // 关卡图片量化用的离屏 canvas（透明底，只画动物）
+    this.animalCv = document.createElement('canvas');
+    this.animalCv.width = SAND_COLS;
+    this.animalCv.height = SAND_ROWS;
+    this.animalCtx = this.animalCv.getContext('2d', { willReadFrequently: true });
+
+    // 关卡进度：maxLevel = 已解锁的最高关，currentLevel = 当前选中的关
+    this.maxLevel = getMaxLevel(GAME_ID);
+    this.currentLevel = getLevelFromUrl() || this.maxLevel;
+    this.levelPage = 0;
+    this.levelBtns = [];
+
+    this.sandImg = this.add.image(SAND_X, 0, 'sand').setOrigin(0, 0).setDepth(0);
 
     // ---------- 顶部中央：已消除沙粒计数 ----------
     // 沙盘任意颜色都可能出现在顶部，所以用半透明深色胶囊底 + 白字描边保证可读。
@@ -125,7 +168,7 @@ class GameScene extends Phaser.Scene {
     // 自动加速提示（队列空 / 槽位满时出现），放在右上角避免与计数条打架。
     // 显示的是【实际生效倍率】= 手动倍速 × 自动加速，而不是硬编码的 3x ——
     // 否则玩家把手动倍速按到 2x 时，标签写着 3x 而实际跑的是 6x。
-    this.fastLabel = this.add.text(SAND_W - 12, 33, '', {
+    this.fastLabel = this.add.text(CANVAS_W - 12, 33, '', {
       fontSize: '15px', color: '#ffcc55', fontFamily: 'sans-serif', fontStyle: 'bold',
     }).setOrigin(1, 0.5).setDepth(7).setStroke('#000000', 4).setVisible(false);
     this.fastShown = 0;
@@ -140,7 +183,7 @@ class GameScene extends Phaser.Scene {
     this.flyers = [];          // { x, y, tx, ty, color, t, dur, wob }
     this.flySample = 0;        // 抽样累加器
     this.absorbBuf = [];       // absorbInColumns() 写回的真实被吸走格下标，复用避免每帧分配
-    this.belt = new Belt(SAND_W, PLATE_SLOTS);
+    this.belt = new Belt(CANVAS_W, PLATE_SLOTS, SAND_X);
 
     // 盘面数字
     // 盘位标签：按上限 10 个预建，实际用几个由传送带槽位数决定
@@ -176,22 +219,39 @@ class GameScene extends Phaser.Scene {
       .setDepth(5).on('pointerdown', () => this.onSpeed());
     this.speedLabel = this.btnSpeed.getAt(2);
 
-    // ---------- 开始遮罩 ----------
-    this.startOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.72)
+    // ---------- 关卡选择（开始遮罩） ----------
+    this.startOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.78)
       .setDepth(10).setInteractive();
-    this.startTitle = this.add.text(CANVAS_W / 2, CANVAS_H / 2 - 90, '沙画', {
+    this.startTitle = this.add.text(CANVAS_W / 2, 300, '沙画', {
       fontSize: '52px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
     }).setOrigin(0.5).setDepth(11);
-    this.startHint = this.add.text(CANVAS_W / 2, CANVAS_H / 2 - 30,
-      '点队列里的盘子 → 放到盘位 →\n同色沙粒从底部十行被吸走', {
-      fontSize: '17px', color: '#c9d1d9', fontFamily: 'sans-serif', align: 'center', lineSpacing: 8,
+    this.startHint = this.add.text(CANVAS_W / 2, 370,
+      '选择关卡 → 点队列里的盘子 → 放到盘位 → 同色沙粒被吸走', {
+      fontSize: '16px', color: '#c9d1d9', fontFamily: 'sans-serif', align: 'center',
     }).setOrigin(0.5).setDepth(11);
-    this.btnStart = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + 70, '开始游戏', 0xe94560, 26)
-      .setDepth(11).on('pointerdown', () => {
-        this.startOverlay.destroy(); this.startTitle.destroy();
-        this.startHint.destroy(); this.btnStart.destroy();
-        this.running = true;
-      });
+
+    // 关卡翻页（每页 20 关）
+    this.levelPrev = this.add.text(110, 553, '◀', {
+      fontSize: '30px', color: '#ffffff', fontFamily: 'sans-serif',
+    }).setOrigin(0.5).setDepth(12).setInteractive({ useHandCursor: true });
+    this.levelPrev.on('pointerdown', () => {
+      if (this.levelPage > 0) { this.levelPage--; this.renderLevelGrid(); }
+    });
+    this.levelNext = this.add.text(CANVAS_W - 110, 553, '▶', {
+      fontSize: '30px', color: '#ffffff', fontFamily: 'sans-serif',
+    }).setOrigin(0.5).setDepth(12).setInteractive({ useHandCursor: true });
+    this.levelNext.on('pointerdown', () => {
+      if ((this.levelPage + 1) * LEVELS_PER_PAGE < this.maxLevel) {
+        this.levelPage++; this.renderLevelGrid();
+      }
+    });
+
+    this.btnStart = this.makeCartoonButton(CANVAS_W / 2, 830, '开始游戏', 0xe94560, 26)
+      .setDepth(11).on('pointerdown', () => this.beginLevel());
+
+    // 游戏中随时回到关卡选择
+    this.btnLevels = this.makeIconButton(230 * UI_SCALE, BTN_Y, 20 * UI_SCALE, 0xe67e22, 'levels')
+      .setDepth(5).on('pointerdown', () => this.showLevelSelect());
 
     // ---------- 弹窗（清盘 / 结算） ----------
     this.overlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.7)
@@ -213,21 +273,95 @@ class GameScene extends Phaser.Scene {
     this.absorbAccum = 0;
     this.sandDirty = true;
 
-    this.startRound();
-    this.running = false;      // 先摆好棋盘，等玩家点「开始游戏」再跑
+    this.startRound(this.currentLevel);
+    // 从关卡页带 ?level=N 进来时直接开跑，否则先显示关卡选择
+    if (getLevelFromUrl()) {
+      this.hideLevelSelect();
+    } else {
+      this.running = false;
+      this.showLevelSelect();
+    }
+  }
+
+  // ============ 关卡选择 ============
+  showLevelSelect() {
+    this.hideDialog();
+    this.running = false;
+    if (this.currentLevel > this.maxLevel) this.currentLevel = this.maxLevel;
+    this.levelPage = Math.floor((this.currentLevel - 1) / LEVELS_PER_PAGE);
+    this.startOverlay.setVisible(true);
+    this.startTitle.setVisible(true);
+    this.startHint.setVisible(true);
+    this.btnStart.setVisible(true);
+    this.levelPrev.setVisible(true);
+    this.levelNext.setVisible(true);
+    this.renderLevelGrid();
+  }
+
+  hideLevelSelect() {
+    this.startOverlay.setVisible(false);
+    this.startTitle.setVisible(false);
+    this.startHint.setVisible(false);
+    this.btnStart.setVisible(false);
+    this.levelPrev.setVisible(false);
+    this.levelNext.setVisible(false);
+    for (const o of this.levelBtns) o.destroy();
+    this.levelBtns = [];
+  }
+
+  // 只渲染【已解锁】的关卡（1 ~ maxLevel），未解锁的不会出现在界面上。
+  renderLevelGrid() {
+    for (const o of this.levelBtns) o.destroy();
+    this.levelBtns = [];
+    const pageStart = this.levelPage * LEVELS_PER_PAGE + 1;
+    const pageEnd = Math.min(this.maxLevel, pageStart + LEVELS_PER_PAGE - 1);
+    const bw = 60, bh = 54, gap = 10;
+    const totalW = LEVEL_COLS * bw + (LEVEL_COLS - 1) * gap;
+    const x0 = (CANVAS_W - totalW) / 2;
+    const y0 = 430;
+
+    for (let lv = pageStart; lv <= pageEnd; lv++) {
+      const idx = lv - pageStart;
+      const x = x0 + (idx % LEVEL_COLS) * (bw + gap);
+      const y = y0 + ((idx / LEVEL_COLS) | 0) * (bh + gap);
+      const on = lv === this.currentLevel;
+      const bg = this.add.graphics().setDepth(11);
+      bg.fillStyle(on ? 0xe94560 : 0x39404a, on ? 1 : 0.85);
+      bg.fillRoundedRect(x, y, bw, bh, 10);
+      bg.lineStyle(2, on ? 0xffffff : 0x7a838f, on ? 0.95 : 0.55);
+      bg.strokeRoundedRect(x, y, bw, bh, 10);
+      const label = this.add.text(x + bw / 2, y + bh / 2, String(lv), {
+        fontSize: '22px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
+      }).setOrigin(0.5).setDepth(12);
+      const zone = this.add.zone(x + bw / 2, y + bh / 2, bw, bh)
+        .setDepth(13).setInteractive({ useHandCursor: true });
+      zone.on('pointerdown', () => {
+        this.currentLevel = lv;
+        this.renderLevelGrid();
+      });
+      this.levelBtns.push(bg, label, zone);
+    }
+
+    this.levelPrev.setAlpha(this.levelPage > 0 ? 1 : 0.2);
+    this.levelNext.setAlpha((this.levelPage + 1) * LEVELS_PER_PAGE < this.maxLevel ? 1 : 0.2);
+  }
+
+  beginLevel() {
+    this.hideLevelSelect();
+    this.startRound(this.currentLevel);
   }
 
   // ============ 一局开始 ============
-  startRound() {
+  // 关卡决定种子：同一关永远得到同一只动物和同一套背景。
+  startRound(level) {
     this.hideDialog();
-    const kind = SCENE_KINDS[(Math.random() * SCENE_KINDS.length) | 0];
-    const seed = (Math.random() * 0x7FFFFFFF) | 0;
-    this.sceneKind = kind;
+    if (level === undefined) level = this.currentLevel || 1;
+    this.currentLevel = level;
     this.grid = new SandGrid(SAND_COLS, SAND_ROWS, DRAIN_ROWS);
-    this.grid.cells.set(generateScene(kind, seed, SAND_COLS, SAND_ROWS));
+    this.grid.cells.set(this.buildLevelCells(level));
 
     const counts = this.grid.countByColor(SAND_PALETTE.length);
-    this.belt = new Belt(SAND_W, PLATE_SLOTS);
+    this.belt = new Belt(CANVAS_W, PLATE_SLOTS, SAND_X);
     this.queues = distributeToQueues(splitPlates(counts), MAX_QUEUE_COLS);
     this.remaining = TOTAL_SAND;
     this.totalPlates = this.queues.reduce((s, q) => s + q.length, 0);
@@ -240,6 +374,37 @@ class GameScene extends Phaser.Scene {
     this.updateHud();
     this.renderSand();
     this.draw();
+  }
+
+  // 关卡 → 沙盘网格：程序生成背景 + Kenney 动物图，逐像素量化到 11 色调色板。
+  // 同一关卡 seed 固定，所以动物和背景每次都一样。
+  buildLevelCells(level) {
+    const cells = generateBackdrop(levelHash(GAME_ID, level), SAND_COLS, SAND_ROWS);
+    const key = 'animal_' + animalForLevel(level);
+    if (!this.textures.exists(key)) return cells;
+
+    const img = this.textures.get(key).getSourceImage();
+    const ctx = this.animalCtx;
+    ctx.clearRect(0, 0, SAND_COLS, SAND_ROWS);
+    // 主体占宽 76%、占高 58%，底部坐在 89% 处，给天空和地面留出层次
+    const scale = Math.min(SAND_COLS * 0.76 / img.width, SAND_ROWS * 0.58 / img.height);
+    const w = img.width * scale, h = img.height * scale;
+    ctx.drawImage(img, (SAND_COLS - w) / 2, SAND_ROWS * 0.89 - h, w, h);
+
+    // 半透明边缘先与背景色混合再量化，避免缩放抗锯齿产生突兀色块
+    const data = ctx.getImageData(0, 0, SAND_COLS, SAND_ROWS).data;
+    for (let i = 0; i < cells.length; i++) {
+      const a = data[i * 4 + 3];
+      if (a === 0) continue;
+      const bg = SAND_PALETTE[cells[i]];
+      const f = a / 255;
+      cells[i] = nearestPalette(
+        data[i * 4] * f + ((bg.hex >> 16) & 0xFF) * (1 - f),
+        data[i * 4 + 1] * f + ((bg.hex >> 8) & 0xFF) * (1 - f),
+        data[i * 4 + 2] * f + (bg.hex & 0xFF) * (1 - f),
+      );
+    }
+    return cells;
   }
 
   // 顶部计数：只显示一个数字。数字每变化一次触发一次 pop（放大再缩回）。
@@ -266,28 +431,12 @@ class GameScene extends Phaser.Scene {
   }
 
   // ============ 沙盘渲染 ============
-  // 每个格子要判断四邻是否异色来决定描边，所以这里用二维循环而不是单层遍历。
   renderSand() {
     const cells = this.grid.cells;
     const pix = this.bufPix;
-    const W = SAND_COLS, H = SAND_ROWS;
-    for (let y = 0; y < H; y++) {
-      const base = y * W;
-      for (let x = 0; x < W; x++) {
-        const i = base + x;
-        const v = cells[i];
-        if (v < 0) { pix[i] = EMPTY_PIX; continue; }
-        // 描边：四邻有异色（含空）就画黑边。
-        // 越界方向当作同色处理，否则画面四条边会被描一整圈。
-        if ((y > 0 && cells[i - W] !== v) ||
-            (y < H - 1 && cells[i + W] !== v) ||
-            (x > 0 && cells[i - 1] !== v) ||
-            (x < W - 1 && cells[i + 1] !== v)) {
-          pix[i] = OUTLINE_PIX;
-          continue;
-        }
-        pix[i] = PAL_SHADES[v][NOISE_LV[i]];
-      }
+    for (let i = 0; i < cells.length; i++) {
+      const v = cells[i];
+      pix[i] = v < 0 ? EMPTY_PIX : PAL_SHADES[v][NOISE_LV[i]];
     }
     this.bufCtx.putImageData(this.bufImg, 0, 0);
     const ctx = this.sandTexCtx;
@@ -348,7 +497,11 @@ class GameScene extends Phaser.Scene {
         const nFly = Math.floor(this.flySample / FLY_SAMPLE);
         if (nFly > 0) {
           this.flySample -= nFly * FLY_SAMPLE;
-          this.spawnFlyers(nFly, this.absorbBuf, p.color, this.belt.slotX(i), BELT_CY);
+          const sx = this.belt.slotX(i);
+          // 飞行时长上限 = 盘子到达右边界的时间（留 10% 余量）。
+          // 这样最后一颗沙粒必定在盘子绕回左端前落盘，不会出现飞到一半被瞬移截断。
+          const maxDur = Math.max(0, (CANVAS_W - sx) / (BELT_SPEED * rateMul)) * 0.9;
+          if (maxDur > 0.08) this.spawnFlyers(nFly, this.absorbBuf, p.color, sx, BELT_CY, maxDur);
         }
         if (p.remaining <= 0) this.belt.slots[i] = null;
       }
@@ -375,8 +528,9 @@ class GameScene extends Phaser.Scene {
         const f = this.flyers[i];
         f.t += dt;
         f.tx += beltDelta;
-        if (f.tx >= SAND_W) f.tx -= SAND_W;      // 盘子绕回左端时目标也要跟着绕
-        if (f.t >= f.dur) this.flyers.splice(i, 1);
+        // 目标一旦越过右边界就丢弃：盘子会瞬移回左端，若让目标跟着绕回，
+        // 这颗从右侧起飞的沙粒就会横穿整个棋盘飞向左端。
+        if (f.t >= f.dur || f.tx >= CANVAS_W) this.flyers.splice(i, 1);
       }
       uiChanged = true;
     }
@@ -393,17 +547,18 @@ class GameScene extends Phaser.Scene {
   // 从真实被吸走的位置生成飞向盘子的沙粒。
   // buf 是 absorb() 写回的格下标列表，起点直接用这些格的中心 ——
   // 这样飞行动画与实际消失的沙粒严格对应（取料区快空时不会出现"从空地起飞"）。
-  spawnFlyers(nFly, buf, color, tx, ty) {
+  // maxDur：本批沙粒的飞行时长上限，由盘子距离右边界的剩余时间算出。
+  spawnFlyers(nFly, buf, color, tx, ty, maxDur) {
     if (buf.length === 0) return;
     for (let k = 0; k < nFly; k++) {
       if (this.flyers.length >= FLY_MAX) break;
       const idx = buf[(Math.random() * buf.length) | 0];
       this.flyers.push({
-        x: (idx % SAND_COLS) * CELL_PX + CELL_PX / 2,
+        x: SAND_X + (idx % SAND_COLS) * CELL_PX + CELL_PX / 2,
         y: ((idx / SAND_COLS) | 0) * CELL_PX + CELL_PX / 2,
         tx, ty, color,
         t: 0,
-        dur: FLY_SEC * (0.7 + Math.random() * 0.6),   // 时长抖动，避免整批同步
+        dur: Math.min(FLY_SEC * (0.7 + Math.random() * 0.6), maxDur),
         wob: (Math.random() - 0.5) * 70,              // 横向摆动，飞行轨迹更像"飞"
       });
     }
@@ -411,45 +566,66 @@ class GameScene extends Phaser.Scene {
 
   // ============ 绘制 UI ============
   draw() {
-    // ---------- 沙盘外框：粗黑边，把图案和 UI 拉开层次（参考同类游戏的画框） ----------
+    // ---------- 沙盘外框 ----------
+    // 先铺黑色底框，再叠一层白色渐变 + 边缘高光，做出玻璃材质的厚度与反光。
+    // 只做上、左、右三面：底部要与传送带衔接，不封口。
     const frameG = this.frameGfx;
     frameG.clear();
     frameG.fillStyle(0x1a1a1a, 1);
-    frameG.fillRect(0, 0, SAND_W, FRAME);
-    frameG.fillRect(0, SAND_H - FRAME, SAND_W, FRAME);
-    frameG.fillRect(0, 0, FRAME, SAND_H);
-    frameG.fillRect(SAND_W - FRAME, 0, FRAME, SAND_H);
+    frameG.fillRect(0, 0, CANVAS_W, FRAME);
+    frameG.fillRect(0, SAND_H - FRAME, CANVAS_W, FRAME);
+    frameG.fillRect(0, 0, SAND_X, SAND_H);
+    frameG.fillRect(CANVAS_W - SAND_X, 0, SAND_X, SAND_H);
+
+    const GLASS_TOP = 18;
+    frameG.fillGradientStyle(0xffffff, 0xffffff, 0xffffff, 0xffffff, 0.42, 0.42, 0.05, 0.05);
+    frameG.fillRect(0, 0, CANVAS_W, GLASS_TOP);
+    frameG.fillGradientStyle(0xffffff, 0xffffff, 0xffffff, 0xffffff, 0.30, 0.03, 0.30, 0.03);
+    frameG.fillRect(0, 0, SAND_X, SAND_H);
+    frameG.fillGradientStyle(0xffffff, 0xffffff, 0xffffff, 0xffffff, 0.03, 0.30, 0.03, 0.30);
+    frameG.fillRect(CANVAS_W - SAND_X, 0, SAND_X, SAND_H);
+
+    // 玻璃边缘高光
+    frameG.fillStyle(0xffffff, 0.55);
+    frameG.fillRect(0, 0, CANVAS_W, 2);
+    frameG.fillRect(0, 0, 2, SAND_H);
+    frameG.fillRect(CANVAS_W - 2, 0, 2, SAND_H);
+    // 沙盘内沿的细亮边：玻璃压在画面上的分界线
+    frameG.lineStyle(2, 0xffffff, 0.22);
+    frameG.strokeRect(SAND_X - 1, FRAME - 1, SAND_W + 2, SAND_H - FRAME * 2 + 2);
 
     // 取料区示意（底部十行）
     const drainH = DRAIN_ROWS * CELL_PX;
     const dg = this.drainGfx;
     dg.clear();
     dg.lineStyle(2, 0xe94560, 0.45);
-    dg.strokeRect(1, SAND_H - drainH, SAND_W - 2, drainH - 1);
+    dg.strokeRect(SAND_X + 1, SAND_H - drainH, SAND_W - 2, drainH - 1);
 
     // ---------- 传送带带体 ----------
+    // 带子横跨整个画布（含棋盘两侧留白），盘子绕回点因此推到画布右边缘，
+    // 沙盘最后 20px 的行程相当于给飞行中的沙粒多留了一点落盘时间。
     const bg = this.beltGfx;
     bg.clear();
     bg.fillStyle(0x39404a, 1);
-    bg.fillRect(0, BELT_Y, SAND_W, BELT_H);
+    bg.fillRect(0, BELT_Y, CANVAS_W, BELT_H);
     bg.lineStyle(2, 0x232830, 1);
-    bg.strokeRect(1, BELT_Y + 1, SAND_W - 2, BELT_H - 2);
+    bg.strokeRect(1, BELT_Y + 1, CANVAS_W - 2, BELT_H - 2);
     // 随 offset 移动的刻度块 —— 让"带在动"这件事看得见；加速时换成橙色
     const markW = 12, span = 34;
     const off = this.belt.offset % span;
     bg.fillStyle(this.fastMode ? 0xc98a2a : 0x545d69, 1);
-    for (let x = BELT_ARROW; x < SAND_W - BELT_ARROW; x += span) {
+    for (let x = BELT_ARROW; x < CANVAS_W - BELT_ARROW; x += span) {
       const mx = x + off % span;
-      if (mx > BELT_ARROW && mx < SAND_W - BELT_ARROW) bg.fillRect(mx, BELT_Y + 5, markW, BELT_H - 10);
+      if (mx > BELT_ARROW && mx < CANVAS_W - BELT_ARROW) bg.fillRect(mx, BELT_Y + 5, markW, BELT_H - 10);
     }
     // 两端的 > 方向块：明确指示带往右走（参考同类游戏的做法）
     bg.fillStyle(0x262c34, 1);
     bg.fillRect(0, BELT_Y, BELT_ARROW, BELT_H);
-    bg.fillRect(SAND_W - BELT_ARROW, BELT_Y, BELT_ARROW, BELT_H);
+    bg.fillRect(CANVAS_W - BELT_ARROW, BELT_Y, BELT_ARROW, BELT_H);
     bg.lineStyle(2, 0x4a525c, 1);
-    for (const bx of [0, SAND_W - BELT_ARROW]) bg.strokeRect(bx + 1, BELT_Y + 1, BELT_ARROW - 2, BELT_H - 2);
+    for (const bx of [0, CANVAS_W - BELT_ARROW]) bg.strokeRect(bx + 1, BELT_Y + 1, BELT_ARROW - 2, BELT_H - 2);
     bg.lineStyle(6, 0x8a929c, 1);
-    for (const bx of [BELT_ARROW / 2, SAND_W - BELT_ARROW / 2]) {
+    for (const bx of [BELT_ARROW / 2, CANVAS_W - BELT_ARROW / 2]) {
       bg.beginPath();
       bg.moveTo(bx - 6, BELT_CY - 11);
       bg.lineTo(bx + 6, BELT_CY);
@@ -462,7 +638,6 @@ class GameScene extends Phaser.Scene {
     this.btnAddSlot.setAlpha(this.belt.n >= MAX_PLATE_SLOTS ? 0.35 : 1);
 
     // ---------- 带上的盘子 ----------
-    // 盘子可能被带出边缘：在 x 和 x±SAND_W 处各画一次，做出"从一端滑出、另一端滑入"的连续感
     const g = this.plateGfx;
     g.clear();
     for (let i = 0; i < this.belt.n; i++) {
@@ -478,9 +653,9 @@ class GameScene extends Phaser.Scene {
         continue;
       }
 
-      // 槽位 x >= SAND_W 表示已转到屏幕外（带比屏幕长时才会发生）。
+      // 槽位 x >= CANVAS_W 表示已转到屏幕外（带比屏幕长时才会发生）。
       // 不做"两端各画一次"的环绕补绘 —— 盘子滑出右端就该消失，等转回左端再出现。
-      if (cx >= SAND_W + PLATE_R) { lbl.setVisible(false); continue; }
+      if (cx >= CANVAS_W + PLATE_R) { lbl.setVisible(false); continue; }
       g.fillStyle(SAND_PALETTE[p.color].hex);
       g.fillCircle(cx, BELT_CY, PLATE_R);
       g.lineStyle(3, 0x2c3e50, 1);
@@ -492,24 +667,30 @@ class GameScene extends Phaser.Scene {
     const qg = this.queueGfx;
     qg.clear();
     const nCols = this.queues.length;
-    const colW = CANVAS_W / nCols;
+    const innerW = CANVAS_W - QUEUE_MARGIN * 2;
+    const colW = innerW / nCols;
+    const slotW = colW - QUEUE_GAP;
+    // 容器：深色半透明底 + 细边框，把队列从画布灰底中托出来
+    qg.fillStyle(0x000000, 0.22);
+    qg.fillRoundedRect(QUEUE_MARGIN, QUEUE_Y - QUEUE_PAD, innerW, QUEUE_H + QUEUE_PAD * 2, 14);
+    qg.lineStyle(2, 0xffffff, 0.18);
+    qg.strokeRoundedRect(QUEUE_MARGIN, QUEUE_Y - QUEUE_PAD, innerW, QUEUE_H + QUEUE_PAD * 2, 14);
+
     let li = 0;
     for (let ci = 0; ci < nCols; ci++) {
       const col = this.queues[ci];
-      const x = ci * colW + colW / 2 - SLOT / 2;
+      const x = QUEUE_MARGIN + ci * colW + QUEUE_GAP / 2;
       for (let si = 0; si < QROWS; si++) {
-        const y = QUEUE_Y + si * (SLOT + SLOT_GAP);
+        const y = QUEUE_Y + si * (SLOT_H + SLOT_GAP);
         const p = col[si];
         const lbl = this.queueLabels[li++];
         if (p) {
           qg.fillStyle(SAND_PALETTE[p.color].hex);
-          qg.fillRoundedRect(x, y, SLOT, SLOT, 6);
-          qg.lineStyle(3, 0x2c3e50, 1);
-          qg.strokeRoundedRect(x, y, SLOT, SLOT, 6);
-          lbl.setVisible(true).setPosition(x + SLOT / 2, y + SLOT / 2).setText(String(p.capacity));
+          qg.fillRoundedRect(x, y, slotW, SLOT_H, 10);
+          lbl.setVisible(true).setPosition(x + slotW / 2, y + SLOT_H / 2).setText(String(p.capacity));
         } else {
-          qg.lineStyle(2, 0xbbbbbb, 0.8);
-          qg.strokeRoundedRect(x, y, SLOT, SLOT, 6);
+          qg.fillStyle(0x000000, 0.12);
+          qg.fillRoundedRect(x, y, slotW, SLOT_H, 10);
           lbl.setVisible(false);
         }
       }
@@ -536,10 +717,10 @@ class GameScene extends Phaser.Scene {
   onPointerDown(pointer) {
     if (!this.running || this.dialogShown) return;
     const x = pointer.x, y = pointer.y;
-    if (y < QUEUE_Y - 20 || y > QUEUE_Y + QROWS * (SLOT + SLOT_GAP)) return;
+    if (y < QUEUE_Y - QUEUE_PAD || y > QUEUE_Y + QUEUE_H) return;
     const nCols = this.queues.length;
-    const colW = CANVAS_W / nCols;
-    const ci = Math.floor(x / colW);
+    const colW = (CANVAS_W - QUEUE_MARGIN * 2) / nCols;
+    const ci = Math.floor((x - QUEUE_MARGIN) / colW);
     if (ci < 0 || ci >= nCols) return;
     this.onQueueClick(ci);
   }
@@ -547,11 +728,11 @@ class GameScene extends Phaser.Scene {
   onQueueClick(ci) {
     const col = this.queues[ci];
     if (!col || col.length === 0) return;
-    const colW = CANVAS_W / this.queues.length;
+    const colW = (CANVAS_W - QUEUE_MARGIN * 2) / this.queues.length;
 
     // 默认放到离该队列最近的空槽位 —— 不再一有同色就合并。
     // 同色多占几个盘子能同时覆盖多段列，那一色的清除速度会成倍提升。
-    const slot = this.belt.nearestEmpty(ci * colW + colW / 2);
+    const slot = this.belt.nearestEmpty(QUEUE_MARGIN + ci * colW + colW / 2);
     if (slot < 0) return;                       // 没有空位，点了也没用
 
     const plate = col.shift();
@@ -640,8 +821,15 @@ class GameScene extends Phaser.Scene {
 
   finish(win) {
     this.running = false;
-    this.showDialog(win ? '沙画完成！\n所有沙粒都被吸走了。' : '游戏结束\n还有沙粒没被吸走。',
-      '再来一局', () => this.startRound());
+    if (win) {
+      const next = this.currentLevel + 1;
+      this.maxLevel = unlockLevel(GAME_ID, next);   // 通关即解锁下一关，刷新页面也不会退回
+      this.showDialog(`第 ${this.currentLevel} 关完成！\n已解锁第 ${next} 关。`, '下一关',
+        () => this.startRound(next));
+    } else {
+      this.showDialog(`第 ${this.currentLevel} 关失败\n还有沙粒没被吸走。`, '重试本关',
+        () => this.startRound(this.currentLevel));
+    }
   }
 
   onClearPlates() {
@@ -766,6 +954,17 @@ class GameScene extends Phaser.Scene {
         fontFamily: 'sans-serif', fontStyle: 'bold',
       }).setOrigin(0.5).setStroke('#2c3e50', Math.max(2, Math.round(r / 8)));
       c.add([shadow, body, t]);
+    } else if (kind === 'levels') {
+      // 列表图标：白色卡片 + 三条底色横线
+      const w = r * 1.0, h = r * 1.2;
+      body.fillStyle(0xffffff);
+      body.fillRoundedRect(-w / 2, -h / 2, w, h, Math.max(2, r * 0.14));
+      body.fillStyle(fill);
+      const lw2 = w * 0.56, lh = Math.max(2, r * 0.11);
+      for (let i = 0; i < 3; i++) {
+        body.fillRoundedRect(-lw2 / 2, -h * 0.27 + i * h * 0.27, lw2, lh, lh / 2);
+      }
+      c.add([shadow, body]);
     } else {  // speed
       const t = this.add.text(0, 0, speedMultiplier + 'x', {
         fontSize: Math.round(r * 0.9) + 'px', color: '#ffffff',

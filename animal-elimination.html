@@ -13,10 +13,20 @@ canvas { display: block; max-width: 100vw; max-height: 100vh; }
 <body>
 <div id="game"></div>
 <input type="file" id="fileInput" accept="image/*" style="display:none">
-<script src="https://cdn.jsdelivr.net/npm/phaser@4.2.1/dist/phaser.min.js" integrity="sha384-kyUQ5+cxc6+X89xEG6DhcXLcDU9T3Z+o/45VdT6pgAwtG6gxtAzYTEn0Wwj/BKZd" crossorigin="anonymous"></script>
+<script src="assets/vendor/phaser-4.2.1.min.js"></script>
+<script src="level-kit.js"></script>
 <script src="bfs.js"></script>
 <script>
 'use strict';
+
+// ============ 关卡 ============
+const GAME_ID = 'animal-elimination';
+const URL_LEVEL = getLevelFromUrl();
+// 有 ?level=N 时用固定种子，否则保持完全随机
+let RAND = URL_LEVEL ? levelRng(levelHash(GAME_ID, URL_LEVEL)) : Math.random;
+function rand() { return RAND(); }
+// 每次开局重置随机序列：重试同一关会得到完全相同的动物、背景和食物拆分
+function resetRng() { RAND = URL_LEVEL ? levelRng(levelHash(GAME_ID, URL_LEVEL)) : Math.random; }
 
 // ============ 配置（初始值，启动后由图片决定） ============
 let COLS = 30, ROWS = 30;
@@ -64,42 +74,60 @@ shuffleColors();
 let PLATE_COLS = [8, 24, 40, 56, 72, 88];
 let UI_Y = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL;
 
-// Emoji 图案列表（本地渲染，零失败率，每次开局随机选一个）
-const EMOJI_LIST = [
-  '🐱','🐶','🐰','🐼','🦊','🐻','🐸','🐨','🐯','🦁',
-  '🐮','🐷','🐵','🐔','🐧','🦆','🦅','🦉','🐺','🐗',
-  '🐴','🦄','🐝','🦋','🐌','🐞','🐢','🐍','🐙','🐡',
-  '🐠','🐟','🐬','🐳','🦈','🐊','🐆','🦓','🦍','🐘',
-  '🦒','🦙','🦜','🦔','🦦','🦥','🐇','🦩','🦚','🦝',
-  '❤️','🧡','💛','💚','💙','💜','🖤','💝','💖','💕',
-  '⭐','🌟','✨','💫','🎯','🌈','🌙','☀️','🔥',
-  '🌸','🌺','🌻','🌹','🌷','🌼','🍀','🌵','🎄','🌲',
-  '🍎','🍊','🍋','🍇','🍓','🍒','🍑','🍕','🍔','🍩',
-  '🎈','🎉','🎊','🎁','💎','🎵','🎶','🎨','🏆','🧩',
-  '🎲','🔮','💡','🔑','🧸','🤖','👾','🎭','👑','🪄',
-  '👍','👊','🤚','✌️','🤟','👌','🖖','🤞',
+// Kenney 动物图案（与沙画共用同一套本地素材）
+const ANIMAL_NAMES = [
+  'bear', 'buffalo', 'chick', 'chicken', 'cow', 'crocodile', 'dog', 'duck',
+  'elephant', 'frog', 'giraffe', 'goat', 'gorilla', 'hippo', 'horse', 'monkey',
+  'moose', 'narwhal', 'owl', 'panda', 'parrot', 'penguin', 'pig', 'rabbit',
+  'rhino', 'sloth', 'snake', 'walrus', 'whale', 'zebra',
 ];
+const animalCache = new Map();
 
-// 在 Canvas 上渲染随机 Emoji 并返回图片
-function loadEmojiImage(onSuccess, onFail) {
-  const emoji = EMOJI_LIST[Math.floor(Math.random() * EMOJI_LIST.length)];
-  const bgIdx = Math.floor(Math.random() * COLORS.length);
+function loadAnimal(name) {
+  if (animalCache.has(name)) return Promise.resolve(animalCache.get(name));
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => { animalCache.set(name, img); resolve(img); };
+    img.onerror = reject;
+    img.src = 'assets/kenney/animals/' + name + '.png';
+  });
+}
+
+// 随机挑 9 只不同动物拼成 3×3 画面，铺一层纯色背景后交给 processImage 量化。
+// 单个动物只有 1~2 种主色，量化后棋盘会几乎只剩两种颜色；拼贴能显著拉开色彩层次。
+function loadKenneyImage(onSuccess, onFail) {
+  resetRng();   // 每次开局从头跑随机序列：同一关的动物、背景、食物拆分完全一致
+  const bgIdx = (rand() * COLORS.length) | 0;
   const bgColor = '#' + COLORS[bgIdx].toString(16).padStart(6, '0');
-  const size = 400;
-  const cvs = document.createElement('canvas');
-  cvs.width = size;
-  cvs.height = size;
-  const ctx = cvs.getContext('2d');
-  ctx.fillStyle = bgColor;
-  ctx.fillRect(0, 0, size, size);
-  ctx.font = '320px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(emoji, size / 2, size / 2 + 10);
-  const img = new Image();
-  img.onload = () => onSuccess(img);
-  img.onerror = onFail;
-  img.src = cvs.toDataURL();
+  const GRID = 3;
+  const pool = ANIMAL_NAMES.slice();
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = (rand() * (i + 1)) | 0;
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const picks = pool.slice(0, GRID * GRID);
+
+  Promise.all(picks.map(loadAnimal)).then(animals => {
+    const size = 400;
+    const cell = size / GRID;
+    const cvs = document.createElement('canvas');
+    cvs.width = size;
+    cvs.height = size;
+    const ctx = cvs.getContext('2d');
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, size, size);
+    animals.forEach((animal, i) => {
+      const cx = (i % GRID) * cell;
+      const cy = ((i / GRID) | 0) * cell;
+      const scale = Math.min(cell * 0.86 / animal.width, cell * 0.86 / animal.height);
+      const w = animal.width * scale, h = animal.height * scale;
+      ctx.drawImage(animal, cx + (cell - w) / 2, cy + (cell - h) / 2, w, h);
+    });
+    const img = new Image();
+    img.onload = () => onSuccess(img);
+    img.onerror = onFail;
+    img.src = cvs.toDataURL();
+  }).catch(() => { if (onFail) onFail(); });
 }
 
 // ============ 游戏状态 ============
@@ -121,7 +149,7 @@ function generateGrid() {
   grid = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
   for (let r = 0; r < ROWS; r++)
     for (let c = 0; c < COLS; c++)
-      grid[r][c] = Math.floor(Math.random() * COLORS.length);
+      grid[r][c] = Math.floor(rand() * COLORS.length);
 }
 generateGrid();
 
@@ -141,7 +169,7 @@ function generateFoods(animalCounts) {
     let total = 0;
     while (total < count) {
       const remaining = count - total;
-      const cap = remaining <= 50 ? remaining : 30 + Math.floor(Math.random() * 21);
+      const cap = remaining <= 50 ? remaining : 30 + Math.floor(rand() * 21);
       allFoods.push({ color, capacity: cap, remaining: cap, attracted: 0, plateIndex: -1, active: false });
       total += cap;
     }
@@ -151,7 +179,7 @@ function generateFoods(animalCounts) {
 
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
 }
@@ -321,12 +349,7 @@ class GameScene extends Phaser.Scene {
 
     this.btnStart = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2, '开始游戏', 0xe94560, 32)
       .setDepth(1).setVisible(false)
-      .on('pointerdown', () => {
-        this.startOverlay.destroy();
-        this.loadingText.destroy();
-        this.btnStart.destroy();
-        gameRunning = true;
-      });
+      .on('pointerdown', () => this.startNow());
 
     // 设置按钮（齿轮图标，常驻左下角）
     this.btnSettings = this.makeGearButton(Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE), Math.round(18 * UI_SCALE), 0x3498db)
@@ -905,6 +928,7 @@ class GameScene extends Phaser.Scene {
     const hasAnimals = remainingAnimals > 0;
 
     if (allQueuesEmpty && allPlatesEmpty && !hasAnimals && movingAnimals.length === 0) {
+      if (URL_LEVEL) unlockLevel(GAME_ID, URL_LEVEL + 1);   // 通关解锁下一关
       this.msgText.setText('胜利! 所有动物都吃饱了!').setVisible(true);
       this.victoryOverlay.setVisible(true);
       this.drawVictoryPanel();
@@ -930,7 +954,7 @@ class GameScene extends Phaser.Scene {
     this.victoryPanel.setVisible(false);
     this.btnRestart.setVisible(false);
     this.btnReshuffle.setVisible(true);
-    loadEmojiImage(img => {
+    loadKenneyImage(img => {
       this.currentImg = img;
       processImage(img);
       this.scale.resize(CANVAS_W, CANVAS_H);
@@ -951,7 +975,7 @@ class GameScene extends Phaser.Scene {
   loadRandomImage() {
     this.loadingText.setVisible(true);
     this.btnStart.setVisible(false);
-    loadEmojiImage(img => {
+    loadKenneyImage(img => {
       this.currentImg = img;
       processImage(img);
       this.scale.resize(CANVAS_W, CANVAS_H);
@@ -961,6 +985,7 @@ class GameScene extends Phaser.Scene {
       this.drawUI();
       this.loadingText.setVisible(false);
       this.btnStart.setVisible(true);
+      if (URL_LEVEL) this.startNow();     // 从关卡页进来，直接开跑
     }, () => {
       this.loadingText.setText('图片加载失败，使用默认棋盘');
       this.initGame();
@@ -968,7 +993,17 @@ class GameScene extends Phaser.Scene {
       this.drawUI();
       this.loadingText.setVisible(false);
       this.btnStart.setVisible(true);
+      if (URL_LEVEL) this.startNow();
     });
+  }
+
+  // 收掉开始遮罩并开跑（点按钮和 URL 自动进入共用）
+  startNow() {
+    if (!this.startOverlay.active) return;
+    this.startOverlay.destroy();
+    this.loadingText.destroy();
+    this.btnStart.destroy();
+    gameRunning = true;
   }
 
   initGame() {

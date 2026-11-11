@@ -83,6 +83,74 @@ function mulberry32(a) {
 
 const SCENE_KINDS = ['mountain', 'city', 'sea', 'field'];
 
+// ============ 关卡 ============
+// 图片主体：沙盘的图案不再由程序绘制，而是把 Kenney 动物图量化到网格。
+// 关卡与动物的对应关系固定下来，同一关永远同一只动物。
+const LEVEL_ANIMALS = [
+  'bear', 'buffalo', 'chick', 'chicken', 'cow', 'crocodile', 'dog', 'duck',
+  'elephant', 'frog', 'giraffe', 'goat', 'gorilla', 'hippo', 'horse', 'monkey',
+  'moose', 'narwhal', 'owl', 'panda', 'parrot', 'penguin', 'pig', 'rabbit',
+  'rhino', 'sloth', 'snake', 'walrus', 'whale', 'zebra',
+];
+
+// 关卡号 → 稳定种子（FNV-1a）。同一关永远得到同一背景与动物。
+function levelSeed(level) {
+  const s = 'level-' + level;
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function animalForLevel(level) {
+  return LEVEL_ANIMALS[(level - 1) % LEVEL_ANIMALS.length];
+}
+
+// 关卡背景：三段天空 + 远/近两层起伏地面。
+// 不画任何景物 —— 画面主体由 Kenney 图片叠加，这里只保证背景有层次且颜色可控。
+function generateBackdrop(seed, cols, rows) {
+  cols = cols || SAND_COLS;
+  rows = rows || SAND_ROWS;
+  const rnd = mulberry32(seed >>> 0);
+  const cells = new Int16Array(cols * rows);
+  const pick = (arr) => arr[(rnd() * arr.length) | 0];
+  const pickNot = (arr, ...not) => {
+    const ok = arr.filter(c => !not.includes(c));
+    return ok.length ? pick(ok) : arr[0];
+  };
+
+  const sky = pick(SKY_TRIPLES);
+  const horizon = Math.round(rows * (0.52 + rnd() * 0.08));
+  const b1 = Math.round(horizon * 0.38);
+  const b2 = Math.round(horizon * 0.72);
+  const band = (y0, y1, c) => {
+    const end = Math.min(rows, Math.max(0, y1));
+    for (let y = Math.max(0, y0); y < end; y++) cells.fill(c, y * cols, y * cols + cols);
+  };
+  band(0, b1, sky[0]);
+  band(b1, b2, sky[1]);
+  band(b2, horizon, sky[2]);
+
+  const far = pickNot([C_PURPLE, C_BLUE, C_BEIGE, C_DARKRED, C_DARKGREEN], sky[0], sky[1], sky[2]);
+  const ground = pickNot([C_DARKGREEN, C_GREEN, C_BEIGE, C_DARKRED, C_BLACK],
+                         far, sky[0], sky[1], sky[2]);
+  const amp = rows * (0.02 + rnd() * 0.03);
+  const freq = 0.02 + rnd() * 0.02;
+  const phase = rnd() * 6.28;
+  const base = rows * (0.86 + rnd() * 0.04);
+
+  for (let x = 0; x < cols; x++) {
+    const y = Math.round(base - amp * (Math.sin(x * freq + phase) * 0.62 +
+                                      Math.sin(x * freq * 2.37 + phase * 1.7) * 0.38));
+    const yFar = Math.max(horizon, Math.min(rows, y));
+    for (let yy = horizon; yy < yFar; yy++) cells[yy * cols + x] = far;
+    for (let yy = yFar; yy < rows; yy++) cells[yy * cols + x] = ground;
+  }
+  return cells;
+}
+
 // 天空配色（从天顶 → 地平线，三层色带）
 // 沙画没法做真渐变，但用 3 条明度递变的色带就能读出纵深，比单一底色强得多。
 // 三条必须互不相同：曾经用过 [蓝, 蓝, 白] 的"晴空"，结果蓝色吃掉天空 2/3，
@@ -584,8 +652,9 @@ function rebalanceQueues(queues) {
 const VISIBLE_SLOTS = 7;      // 一屏显示几个盘位（决定槽位间距）
 
 class Belt {
-  constructor(width, slotCount) {
-    this.window = width;                  // 可视窗口宽度（= 沙盘宽度）
+  constructor(width, slotCount, origin) {
+    this.window = width;                  // 可视窗口宽度（= 画布宽度，含棋盘两侧留白）
+    this.origin = origin || 0;            // 沙盘左边界在画布上的 x（左右留白宽度）
     this.n = slotCount || PLATE_SLOTS;
     this.recompute();
     this.offset = 0;              // 带已移动的距离（归一化在 [0, length)）
@@ -634,13 +703,16 @@ class Belt {
     this.idleCycles = 0;
   }
 
-  // 槽位 i 覆盖的列区间 [c0, c1)（按容差展开）。屏幕外的槽位返回空区间。
+  // 槽位 i 覆盖的列区间 [c0, c1)（按容差展开）。屏幕外、或走到两侧留白区的槽位返回空区间。
   slotColumns(i, cellPx) {
     const x = this.slotX(i);
     if (x >= this.window) return [0, 0];
-    const c0 = Math.max(0, Math.floor((x - ABSORB_TOL) / cellPx));
-    const c1 = Math.min(Math.round(this.window / cellPx), Math.ceil((x + ABSORB_TOL) / cellPx));
-    return [c0, c1];
+    const local = x - this.origin;
+    const span = this.window - this.origin * 2;   // 沙盘可视宽度
+    if (local < 0 || local >= span) return [0, 0];
+    const c0 = Math.max(0, Math.floor((local - ABSORB_TOL) / cellPx));
+    const c1 = Math.min(Math.round(span / cellPx), Math.ceil((local + ABSORB_TOL) / cellPx));
+    return c0 < c1 ? [c0, c1] : [0, 0];
   }
 
   // 离 x 最近的【可见】空槽位下标；没有则返回 -1
@@ -696,6 +768,7 @@ if (typeof module !== 'undefined') {
     C_WHITE, C_BEIGE, C_PINK, C_ORANGE, C_RED, C_DARKRED, C_PURPLE, C_BLUE,
     C_GREEN, C_DARKGREEN, C_BLACK,
     SCENE_KINDS, mulberry32, generateScene, SandGrid, Belt,
+    LEVEL_ANIMALS, levelSeed, animalForLevel, generateBackdrop,
     splitPlates, shuffle, distributeToQueues, rebalanceQueues,
   };
 }
