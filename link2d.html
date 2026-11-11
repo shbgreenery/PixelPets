@@ -9,6 +9,7 @@
   #hud { color: #333; padding: 12px 16px; line-height: 1.8; }
   #hud button { margin: 4px 4px 0 0; padding: 6px 14px; border: none; border-radius: 8px; background: #e94560; color: #fff; cursor: pointer; font-size: 14px; }
   #hud button:hover { background: #ff5c78; }
+  #level-badge { float: right; margin-top: 6px; padding: 5px 14px; border-radius: 8px; background: #2c3e50; color: #fff; font-size: 14px; font-weight: 700; }
   #tip {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
     padding: 8px 16px; background: rgba(0,0,0,0.7); color: #fff;
@@ -34,6 +35,7 @@
   <button id="shuffle">重排</button>
   <button id="reset">重开</button>
   <button id="sound">声音：开</button>
+  <span id="level-badge"></span>
   <div id="tip"></div>
 </div>
 <div id="size-panel">
@@ -57,6 +59,8 @@
 // ============ 关卡 ============
 const GAME_ID = 'link2d';
 const URL_LEVEL = getLevelFromUrl();
+// 右上角显示当前关卡（直接打开、没有 ?level= 时是自由模式）
+document.getElementById('level-badge').textContent = URL_LEVEL ? '第 ' + URL_LEVEL + ' 关' : '自由模式';
 // 有 ?level=N 时固定种子；同一关每次重开都是同一副牌
 function makeRng() {
   return URL_LEVEL ? levelRng(levelHash(GAME_ID, URL_LEVEL)) : Math.random;

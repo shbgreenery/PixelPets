@@ -335,6 +335,18 @@ class GameScene extends Phaser.Scene {
       this.speedBg.strokeCircle(0, 0, r);
     });
 
+    // 左上角：当前关卡（直接打开、没有 ?level= 时是自由模式）
+    const levelLabel = URL_LEVEL ? '第 ' + URL_LEVEL + ' 关' : '自由模式';
+    const lvText = this.add.text(34, 37, levelLabel, {
+      fontSize: Math.round(17 * UI_SCALE) + 'px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
+    }).setOrigin(0, 0.5).setDepth(1.6).setStroke('#000000', 3);
+    const lvBg = this.add.graphics().setDepth(1.5);
+    const lvW = Math.ceil(lvText.width) + 28;
+    lvBg.fillStyle(0x000000, 0.55);
+    lvBg.fillRoundedRect(20, 20, lvW, 34, 17);
+    lvBg.lineStyle(2, 0xffffff, 0.25);
+    lvBg.strokeRoundedRect(20, 20, lvW, 34, 17);
+
     // 启动
     this.gameInited = false;
     this.dialogShown = false;

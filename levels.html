@@ -116,39 +116,53 @@ h1 { font-size: 2rem; font-weight: 800; letter-spacing: 1px; }
 const gameId = new URLSearchParams(location.search).get('game');
 const game = gameId ? LEVEL_GAMES[gameId] : null;
 const content = document.getElementById('content');
+const titleEl = document.getElementById('title');
+const subEl = document.getElementById('sub');
 
-if (!game) {
-  // 未指定游戏：列出所有游戏，点进去再选关卡
-  document.getElementById('title').textContent = '选择游戏';
-  document.getElementById('sub').textContent = '每个游戏都有独立的关卡进度';
-  const box = document.createElement('div');
-  box.className = 'games';
-  for (const [id, g] of Object.entries(LEVEL_GAMES)) {
-    const a = document.createElement('a');
-    a.className = 'game';
-    a.href = 'levels.html?game=' + id;
-    const max = getMaxLevel(id);
-    a.innerHTML = g.name + '<small>已解锁 ' + max + ' 关</small>';
-    box.appendChild(a);
-  }
-  content.appendChild(box);
-} else {
-  document.title = game.name + ' · 选择关卡 · PixelPets';
-  document.getElementById('title').textContent = game.name;
-  const max = getMaxLevel(gameId);
-  document.getElementById('sub').textContent = '只能进入已解锁的关卡（当前最高第 ' + max + ' 关）';
+function render() {
+  content.innerHTML = '';
 
-  const box = document.createElement('div');
-  box.className = 'levels';
-  for (let lv = 1; lv <= max; lv++) {
-    const a = document.createElement('a');
-    a.className = 'level' + (lv === max ? ' current' : '');
-    a.href = game.file + '?level=' + lv;
-    a.textContent = lv;
-    box.appendChild(a);
+  if (!game) {
+    // 未指定游戏：列出所有游戏，点进去再选关卡
+    titleEl.textContent = '选择游戏';
+    subEl.textContent = '每个游戏都有独立的关卡进度';
+    const box = document.createElement('div');
+    box.className = 'games';
+    for (const [id, g] of Object.entries(LEVEL_GAMES)) {
+      const a = document.createElement('a');
+      a.className = 'game';
+      a.href = 'levels.html?game=' + id;
+      const max = getMaxLevel(id);
+      a.innerHTML = g.name + '<small>已解锁 ' + max + ' 关</small>';
+      box.appendChild(a);
+    }
+    content.appendChild(box);
+  } else {
+    document.title = game.name + ' · 选择关卡 · PixelPets';
+    titleEl.textContent = game.name;
+    const max = getMaxLevel(gameId);
+    subEl.textContent = '只能进入已解锁的关卡（当前最高第 ' + max + ' 关）';
+
+    const box = document.createElement('div');
+    box.className = 'levels';
+    for (let lv = 1; lv <= max; lv++) {
+      const a = document.createElement('a');
+      a.className = 'level' + (lv === max ? ' current' : '');
+      a.href = game.file + '?level=' + lv;
+      a.textContent = lv;
+      box.appendChild(a);
+    }
+    content.appendChild(box);
   }
-  content.appendChild(box);
 }
+
+render();
+
+// 从游戏页按返回时，浏览器可能直接恢复缓存页面、脚本不再执行，
+// 这里在缓存恢复时重新渲染，让解锁进度跟上。
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted) render();
+});
 </script>
 </body>
 </html>

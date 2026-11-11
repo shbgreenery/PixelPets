@@ -99,8 +99,6 @@ const FLY_SIZE = 9;          // 沙粒绘制边长（画布像素）
 
 // ============ 关卡 ============
 const GAME_ID = 'sand-painting';
-const LEVELS_PER_PAGE = 20;              // 关卡选择每页 5 列 × 4 行
-const LEVEL_COLS = 5;
 
 // 调色板 RGB + 最近色查找：把 Kenney 图片的像素量化到 11 色调色板。
 const PAL_RGB = SAND_PALETTE.map(c => [(c.hex >> 16) & 0xFF, (c.hex >> 8) & 0xFF, c.hex & 0xFF]);
@@ -145,11 +143,9 @@ class GameScene extends Phaser.Scene {
     this.animalCv.height = SAND_ROWS;
     this.animalCtx = this.animalCv.getContext('2d', { willReadFrequently: true });
 
-    // 关卡进度：maxLevel = 已解锁的最高关，currentLevel = 当前选中的关
+    // 关卡进度：maxLevel = 已解锁的最高关，currentLevel = 当前玩的关
     this.maxLevel = getMaxLevel(GAME_ID);
     this.currentLevel = getLevelFromUrl() || this.maxLevel;
-    this.levelPage = 0;
-    this.levelBtns = [];
 
     this.sandImg = this.add.image(SAND_X, 0, 'sand').setOrigin(0, 0).setDepth(0);
 
@@ -164,6 +160,12 @@ class GameScene extends Phaser.Scene {
     this.hudPillW = 0;
     this.hudPop = 0;          // 1 → 0 的 pop 进度
     this.fastMode = false;
+
+    // 左上角：当前关卡。换关时由 startRound() 调 updateLevelLabel() 同步文字。
+    this.levelBg = this.add.graphics().setDepth(6);
+    this.levelText = this.add.text(34, 33, '', {
+      fontSize: '18px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
+    }).setOrigin(0, 0.5).setDepth(7).setStroke('#000000', 3);
 
     // 自动加速提示（队列空 / 槽位满时出现），放在右上角避免与计数条打架。
     // 显示的是【实际生效倍率】= 手动倍速 × 自动加速，而不是硬编码的 3x ——
@@ -219,40 +221,6 @@ class GameScene extends Phaser.Scene {
       .setDepth(5).on('pointerdown', () => this.onSpeed());
     this.speedLabel = this.btnSpeed.getAt(2);
 
-    // ---------- 关卡选择（开始遮罩） ----------
-    this.startOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.78)
-      .setDepth(10).setInteractive();
-    this.startTitle = this.add.text(CANVAS_W / 2, 300, '沙画', {
-      fontSize: '52px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
-    }).setOrigin(0.5).setDepth(11);
-    this.startHint = this.add.text(CANVAS_W / 2, 370,
-      '选择关卡 → 点队列里的盘子 → 放到盘位 → 同色沙粒被吸走', {
-      fontSize: '16px', color: '#c9d1d9', fontFamily: 'sans-serif', align: 'center',
-    }).setOrigin(0.5).setDepth(11);
-
-    // 关卡翻页（每页 20 关）
-    this.levelPrev = this.add.text(110, 553, '◀', {
-      fontSize: '30px', color: '#ffffff', fontFamily: 'sans-serif',
-    }).setOrigin(0.5).setDepth(12).setInteractive({ useHandCursor: true });
-    this.levelPrev.on('pointerdown', () => {
-      if (this.levelPage > 0) { this.levelPage--; this.renderLevelGrid(); }
-    });
-    this.levelNext = this.add.text(CANVAS_W - 110, 553, '▶', {
-      fontSize: '30px', color: '#ffffff', fontFamily: 'sans-serif',
-    }).setOrigin(0.5).setDepth(12).setInteractive({ useHandCursor: true });
-    this.levelNext.on('pointerdown', () => {
-      if ((this.levelPage + 1) * LEVELS_PER_PAGE < this.maxLevel) {
-        this.levelPage++; this.renderLevelGrid();
-      }
-    });
-
-    this.btnStart = this.makeCartoonButton(CANVAS_W / 2, 830, '开始游戏', 0xe94560, 26)
-      .setDepth(11).on('pointerdown', () => this.beginLevel());
-
-    // 游戏中随时回到关卡选择
-    this.btnLevels = this.makeIconButton(230 * UI_SCALE, BTN_Y, 20 * UI_SCALE, 0xe67e22, 'levels')
-      .setDepth(5).on('pointerdown', () => this.showLevelSelect());
-
     // ---------- 弹窗（清盘 / 结算） ----------
     this.overlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.7)
       .setVisible(false).setDepth(20).setInteractive();
@@ -274,81 +242,6 @@ class GameScene extends Phaser.Scene {
     this.sandDirty = true;
 
     this.startRound(this.currentLevel);
-    // 从关卡页带 ?level=N 进来时直接开跑，否则先显示关卡选择
-    if (getLevelFromUrl()) {
-      this.hideLevelSelect();
-    } else {
-      this.running = false;
-      this.showLevelSelect();
-    }
-  }
-
-  // ============ 关卡选择 ============
-  showLevelSelect() {
-    this.hideDialog();
-    this.running = false;
-    if (this.currentLevel > this.maxLevel) this.currentLevel = this.maxLevel;
-    this.levelPage = Math.floor((this.currentLevel - 1) / LEVELS_PER_PAGE);
-    this.startOverlay.setVisible(true);
-    this.startTitle.setVisible(true);
-    this.startHint.setVisible(true);
-    this.btnStart.setVisible(true);
-    this.levelPrev.setVisible(true);
-    this.levelNext.setVisible(true);
-    this.renderLevelGrid();
-  }
-
-  hideLevelSelect() {
-    this.startOverlay.setVisible(false);
-    this.startTitle.setVisible(false);
-    this.startHint.setVisible(false);
-    this.btnStart.setVisible(false);
-    this.levelPrev.setVisible(false);
-    this.levelNext.setVisible(false);
-    for (const o of this.levelBtns) o.destroy();
-    this.levelBtns = [];
-  }
-
-  // 只渲染【已解锁】的关卡（1 ~ maxLevel），未解锁的不会出现在界面上。
-  renderLevelGrid() {
-    for (const o of this.levelBtns) o.destroy();
-    this.levelBtns = [];
-    const pageStart = this.levelPage * LEVELS_PER_PAGE + 1;
-    const pageEnd = Math.min(this.maxLevel, pageStart + LEVELS_PER_PAGE - 1);
-    const bw = 60, bh = 54, gap = 10;
-    const totalW = LEVEL_COLS * bw + (LEVEL_COLS - 1) * gap;
-    const x0 = (CANVAS_W - totalW) / 2;
-    const y0 = 430;
-
-    for (let lv = pageStart; lv <= pageEnd; lv++) {
-      const idx = lv - pageStart;
-      const x = x0 + (idx % LEVEL_COLS) * (bw + gap);
-      const y = y0 + ((idx / LEVEL_COLS) | 0) * (bh + gap);
-      const on = lv === this.currentLevel;
-      const bg = this.add.graphics().setDepth(11);
-      bg.fillStyle(on ? 0xe94560 : 0x39404a, on ? 1 : 0.85);
-      bg.fillRoundedRect(x, y, bw, bh, 10);
-      bg.lineStyle(2, on ? 0xffffff : 0x7a838f, on ? 0.95 : 0.55);
-      bg.strokeRoundedRect(x, y, bw, bh, 10);
-      const label = this.add.text(x + bw / 2, y + bh / 2, String(lv), {
-        fontSize: '22px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
-      }).setOrigin(0.5).setDepth(12);
-      const zone = this.add.zone(x + bw / 2, y + bh / 2, bw, bh)
-        .setDepth(13).setInteractive({ useHandCursor: true });
-      zone.on('pointerdown', () => {
-        this.currentLevel = lv;
-        this.renderLevelGrid();
-      });
-      this.levelBtns.push(bg, label, zone);
-    }
-
-    this.levelPrev.setAlpha(this.levelPage > 0 ? 1 : 0.2);
-    this.levelNext.setAlpha((this.levelPage + 1) * LEVELS_PER_PAGE < this.maxLevel ? 1 : 0.2);
-  }
-
-  beginLevel() {
-    this.hideLevelSelect();
-    this.startRound(this.currentLevel);
   }
 
   // ============ 一局开始 ============
@@ -357,6 +250,7 @@ class GameScene extends Phaser.Scene {
     this.hideDialog();
     if (level === undefined) level = this.currentLevel || 1;
     this.currentLevel = level;
+    this.updateLevelLabel();
     this.grid = new SandGrid(SAND_COLS, SAND_ROWS, DRAIN_ROWS);
     this.grid.cells.set(this.buildLevelCells(level));
 
@@ -428,6 +322,17 @@ class GameScene extends Phaser.Scene {
     // 只在上一轮 pop 完全回落时才重新触发。
     // 连续消除时每秒会变化上百次，若每次都重置进度，数字会一直卡在最大尺寸而不像"跳动"。
     if (this.hudPop === 0) this.hudPop = 1;
+  }
+
+  // 左上角关卡标签：胶囊宽度贴合文字
+  updateLevelLabel() {
+    this.levelText.setText('第 ' + this.currentLevel + ' 关');
+    const w = Math.ceil(this.levelText.width) + 28;
+    this.levelBg.clear();
+    this.levelBg.fillStyle(0x000000, 0.55);
+    this.levelBg.fillRoundedRect(20, 12, w, 42, 21);
+    this.levelBg.lineStyle(2, 0xffffff, 0.25);
+    this.levelBg.strokeRoundedRect(20, 12, w, 42, 21);
   }
 
   // ============ 沙盘渲染 ============
@@ -954,17 +859,6 @@ class GameScene extends Phaser.Scene {
         fontFamily: 'sans-serif', fontStyle: 'bold',
       }).setOrigin(0.5).setStroke('#2c3e50', Math.max(2, Math.round(r / 8)));
       c.add([shadow, body, t]);
-    } else if (kind === 'levels') {
-      // 列表图标：白色卡片 + 三条底色横线
-      const w = r * 1.0, h = r * 1.2;
-      body.fillStyle(0xffffff);
-      body.fillRoundedRect(-w / 2, -h / 2, w, h, Math.max(2, r * 0.14));
-      body.fillStyle(fill);
-      const lw2 = w * 0.56, lh = Math.max(2, r * 0.11);
-      for (let i = 0; i < 3; i++) {
-        body.fillRoundedRect(-lw2 / 2, -h * 0.27 + i * h * 0.27, lw2, lh, lh / 2);
-      }
-      c.add([shadow, body]);
     } else {  // speed
       const t = this.add.text(0, 0, speedMultiplier + 'x', {
         fontSize: Math.round(r * 0.9) + 'px', color: '#ffffff',
