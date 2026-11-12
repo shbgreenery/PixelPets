@@ -1660,7 +1660,9 @@ class GameScene extends Phaser.Scene {
   }
 
   onNextLevel() {
-    location.href = 'animal-elimination.html?level=' + (URL_LEVEL + 1);
+    // 用 replace：整页跳关若用 location.href 会往历史栈里压记录，
+    // 连跳几关后按浏览器返回只会退回上一关，回不到关卡选择页。
+    location.replace('animal-elimination.html?level=' + (URL_LEVEL + 1));
   }
 
   // ============ 开局与布局 ============

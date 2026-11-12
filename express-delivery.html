@@ -436,7 +436,8 @@ class MainScene extends Phaser.Scene {
         const label = win ? (URL_LEVEL ? '下一关' : '下一局') : '重试本关';
         this.add.text(centerX, centerX + 45, label, { fontSize: '22px', color: '#fff' }).setOrigin(0.5).setDepth(102);
         btn.on('pointerdown', () => {
-            if (win && URL_LEVEL) location.href = 'express-delivery.html?level=' + (URL_LEVEL + 1);
+            // 用 replace：跳关不新增历史记录，按返回直接回到关卡选择页
+            if (win && URL_LEVEL) location.replace('express-delivery.html?level=' + (URL_LEVEL + 1));
             else this.scene.restart();
         });
     }

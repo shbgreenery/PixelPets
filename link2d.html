@@ -154,7 +154,8 @@ class GameScene extends Phaser.Scene {
     // 有关卡时按钮进入下一关；直接打开（自由模式）则重开一局
     if (URL_LEVEL) this.nextBtn.textContent = '下一关';
     this.nextBtn.onclick = () => {
-      if (URL_LEVEL) location.href = 'link2d.html?level=' + (URL_LEVEL + 1);
+      // 用 replace：跳关不新增历史记录，按返回直接回到关卡选择页
+      if (URL_LEVEL) location.replace('link2d.html?level=' + (URL_LEVEL + 1));
       else this.restartRound();
     };
   }
