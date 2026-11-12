@@ -3,11 +3,51 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>动物消除 · Phaser 4</title>
+<title>动物消除 · 自然标本桌</title>
 <style>
-body { margin: 0; background: #d0d0d0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-#game { background: #e8e8e8; }
-canvas { display: block; max-width: 100vw; max-height: 100vh; }
+/* 页面只负责把游戏画布放在一张暖色桌面上；游戏内的绘制都在 Phaser 画布上。
+   深暖炭色 + 径向暖光 + 内阴影暗角，让彩虹棋盘成为桌面上唯一的标本。 */
+:root {
+  --night: #1A1512;
+  --paper: #F5EFE4;
+  --amber: #E0A44A;
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% 0%, #2C231B 0%, #1A1512 54%, #100D0A 100%);
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 200px rgba(0, 0, 0, 0.55);
+}
+#game { filter: drop-shadow(0 26px 60px rgba(0, 0, 0, 0.55)); }
+canvas {
+  display: block;
+  max-width: 100vw;
+  max-height: 100vh;
+  max-height: 100svh;
+}
 </style>
 </head>
 <body>
@@ -16,10 +56,64 @@ canvas { display: block; max-width: 100vw; max-height: 100vh; }
 <script src="assets/vendor/phaser-4.2.1.min.js"></script>
 <script src="level-kit.js"></script>
 <script src="bfs.js"></script>
+<script src="animal-assets.js"></script>
 <script>
 'use strict';
 
-// ============ 关卡 ============
+// ============ 视觉令牌 ============
+// 深暖炭色桌面 + 胡桃木画框 + 黄铜内线 + 单一琥珀强调色。
+// 颜色在这个游戏里是玩法信息（16 组匹配），所以 UI 必须克制。
+const C = {
+  night: 0x1A1512,
+  nightTop: 0x2C231B,
+  nightBottom: 0x100D0A,
+  surface: 0x201A15,
+  surfaceHi: 0x2C241D,
+  line: 0x4A3B2C,
+  brass: 0xD9A75C,
+  brassDeep: 0x8A6534,
+  amber: 0xE0A44A,
+  amberSoft: 0xB47A2E,
+  paper: 0xF5EFE4,
+  paperDeep: 0xEADFCF,
+  paperLine: 0xD8C9B0,
+  ink: 0x2A231D,
+  inkSoft: 0x5A4C3D,
+  inkMuted: 0x6E6252,
+  text: 0xF5EFE6,
+  textDim: 0xA99C8C,
+  plateRing: 0x14100C,
+  danger: 0xC4553F,
+  success: 0x7FAE72,
+};
+const FONT_UI = '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif';
+const FONT_DISPLAY = '"Songti SC", "Noto Serif SC", "STSong", "SimSun", serif';
+const FONT_NUM = '"SF Mono", "Menlo", "Consolas", "Courier New", monospace';
+
+// 依据颜色亮度自动选择深字或浅字，保证每一种色块上的数字都够对比。
+function srgbLin(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+function relLum(hex) {
+  return 0.2126 * srgbLin((hex >> 16) & 0xFF) +
+         0.7152 * srgbLin((hex >> 8) & 0xFF) +
+         0.0722 * srgbLin(hex & 0xFF);
+}
+function readableInk(hex) {
+  const L = relLum(hex);
+  const onWhite = 1.05 / (L + 0.05);
+  const onDark = (L + 0.05) / 0.062;
+  return onWhite >= onDark ? '#FFFFFF' : '#241C15';
+}
+function shadeHex(hex, f) {
+  const r = Math.min(255, Math.round(((hex >> 16) & 0xFF) * f));
+  const g = Math.min(255, Math.round(((hex >> 8) & 0xFF) * f));
+  const b = Math.min(255, Math.round((hex & 0xFF) * f));
+  return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+}
+
+const REDUCED = typeof window !== 'undefined' && window.matchMedia &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ============ 关卡与随机 ============
 const GAME_ID = 'animal-elimination';
 const URL_LEVEL = getLevelFromUrl();
 // 有 ?level=N 时用固定种子，否则保持完全随机
@@ -34,42 +128,63 @@ let CELL = 8;
 const BLANK_ROWS = 2;
 const TARGET_W = 800;      // 棋盘目标宽度（像素），格子大小按此缩放
 let BOARD_MAX_DIM = 30;    // 棋盘尺寸上限（最长边）
-const saved = localStorage.getItem('boardSize');
-if (saved) BOARD_MAX_DIM = parseInt(saved, 10);
+const savedBoard = localStorage.getItem('boardSize');
+if (savedBoard) BOARD_MAX_DIM = parseInt(savedBoard, 10);
 let CANVAS_W = 800;
 let CANVAS_H = 1080;
 // 移动端（触摸设备）UI 放大倍数，桌面端为 1
 const UI_SCALE = (typeof window !== 'undefined' && 'ontouchstart' in window) ? 1.5 : 1;
 // 棋盘左右边距（像素）
 const BOARD_MARGIN = Math.round(20 * UI_SCALE);
-// 棋盘顶部边距（仅留少量呼吸空间，设置按钮已移到左下角）
+// 棋盘顶部边距（顶栏叠在棋盘上，不额外占高度）
 const TOP_MARGIN = Math.round(20 * UI_SCALE);
-// 盘子半径（直径占槽位 60%，圆形盘子）
+// 底部 UI 高度预算：盘子 + 两行队列 + 隐藏数量角标 + 工具栏
+const BOTTOM_H = 300;
+const EMPTY_BOARD = '#332C25';
+// 盘子半径（直径占槽位 60%，圆形食盆）
 function plateRadius() { return Math.round(COLS * CELL / 6 * 0.3); }
 
+// ============ 16 组天然色板 ============
+// 保留 16 组匹配，但把原本等亮度的霓虹彩虹换成明度更有层次的天然色。
+// 主色用于棋盘与食物，深色用于盘子/槽位的盘沿，形成一圈同色系的暗边。
 let COLORS = [
-  0xd34545, 0xd37a45, 0xd3b045, 0xc2d345,
-  0x8cd345, 0x57d345, 0x45d369, 0x45d39e,
-  0x45d3d3, 0x459ed3, 0x4569d3, 0x5745d3,
-  0x8c45d3, 0xc245d3, 0xd345b0, 0xd3457a,
+  0xE15759, 0xF28E2B, 0xEDC948, 0x8CB369,
+  0x59A14F, 0x2F8F83, 0x76B7B2, 0x4E79A7,
+  0x3B5BA5, 0x6B5B95, 0xB07AA1, 0xC75C8C,
+  0xE08A6A, 0x9C755F, 0xBAB0AC, 0x5E5E5E,
 ];
 let DARK_COLORS = [
-  0xa93737, 0xa96137, 0xa88c37, 0x9ba837,
-  0x70a837, 0x45a837, 0x37a854, 0x37a87e,
-  0x37a8a8, 0x377ea8, 0x3754a8, 0x4537a8,
-  0x7037a8, 0x9b37a8, 0xa8378c, 0xa83761,
+  0xA83F41, 0xB8661F, 0xB89A2E, 0x67854C,
+  0x3F7738, 0x226B62, 0x528B87, 0x385A7C,
+  0x2A4380, 0x4F436F, 0x845A77, 0x964568,
+  0xA8654D, 0x714F3F, 0x8A827E, 0x3F3F3F,
 ];
+// 16 组颜色各自对应一只动物；移动中的动物、食盆和队列共用同一只动物徽记。
+let COLOR_ANIMALS = [
+  'bear', 'rabbit', 'panda', 'owl',
+  'pig', 'cow', 'dog', 'duck',
+  'elephant', 'frog', 'giraffe', 'hippo',
+  'monkey', 'penguin', 'zebra', 'crocodile',
+];
+const SHADE_LEVELS = [0.94, 0.975, 1.0, 1.025];
+let COLOR_INK = [];
+let CELL_SHADES = [];
 
-// 随机打乱调色板顺序：主色 COLORS 与深色边框 DARK_COLORS 保持一一对应
 function shuffleColors() {
-  const pairs = COLORS.map((c, i) => [c, DARK_COLORS[i]]);
-  shuffle(pairs);
-  for (let i = 0; i < pairs.length; i++) {
-    COLORS[i] = pairs[i][0];
-    DARK_COLORS[i] = pairs[i][1];
+  const triples = COLORS.map((c, i) => [c, DARK_COLORS[i], COLOR_ANIMALS[i]]);
+  shuffle(triples);
+  for (let i = 0; i < triples.length; i++) {
+    COLORS[i] = triples[i][0];
+    DARK_COLORS[i] = triples[i][1];
+    COLOR_ANIMALS[i] = triples[i][2];
   }
 }
+function rebuildPaletteCaches() {
+  COLOR_INK = COLORS.map(c => readableInk(c));
+  CELL_SHADES = COLORS.map(c => SHADE_LEVELS.map(f => shadeHex(c, f)));
+}
 shuffleColors();
+rebuildPaletteCaches();
 
 let PLATE_COLS = [8, 24, 40, 56, 72, 88];
 let UI_Y = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL;
@@ -89,14 +204,15 @@ function loadAnimal(name) {
     const img = new Image();
     img.onload = () => { animalCache.set(name, img); resolve(img); };
     img.onerror = reject;
-    img.src = 'assets/kenney/animals/' + name + '.png';
+    // 优先用内嵌 data URI，直接双击 HTML 打开时也不会污染 canvas
+    const embedded = (typeof window !== 'undefined' && window.ANIMAL_DATA_URIS) || {};
+    img.src = embedded[name] || ('assets/kenney/animals/' + name + '.png');
   });
 }
 
 // 随机挑 9 只不同动物拼成 3×3 画面，铺一层纯色背景后交给 processImage 量化。
-// 单个动物只有 1~2 种主色，量化后棋盘会几乎只剩两种颜色；拼贴能显著拉开色彩层次。
 function loadKenneyImage(onSuccess, onFail) {
-  resetRng();   // 每次开局从头跑随机序列：同一关的动物、背景、食物拆分完全一致
+  resetRng();
   const bgIdx = (rand() * COLORS.length) | 0;
   const bgColor = '#' + COLORS[bgIdx].toString(16).padStart(6, '0');
   const GRID = 3;
@@ -139,13 +255,12 @@ let queues, plates;
 let bfsPending = false;
 let gameRunning = false;
 let foodSeq = 0;
-let remainingAnimals = 0;   // 剩余未消除动物数（供 checkGameOver 使用，避免每帧全网格扫描）
-let dirtyCells = [];        // 动物离场后需重绘为空白格的格子
-let speedMultiplier = 1;    // 移动速度倍率（1x / 2x）
+let remainingAnimals = 0;
+let dirtyCells = [];
+let speedMultiplier = 1;
 
 // ============ 棋盘生成 ============
 function generateGrid() {
-  // 默认图块，启动后会被图片覆盖
   grid = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
   for (let r = 0; r < ROWS; r++)
     for (let c = 0; c < COLS; c++)
@@ -191,8 +306,6 @@ function distributeToQueues(allFoods) {
   return q;
 }
 
-// ============ BFS 已收敛到 bfs.js 的 BFS 类，通过全局 plateBFS 数组按盘子下标调用 ============
-
 function markBlankBroadcast(row, col) {
   plateBFS.forEach(b => b.markBlank(row, col));
 }
@@ -205,7 +318,7 @@ function doBFS() {
   bfsPending = false;
   const activeFoods = plates.filter(p => p !== null && p.active);
   if (activeFoods.length === 0) return;
-  // 每个颜色只保留最早放置（FIFO）且仍需派发的食物；已派发足够动物（available <= 0）的跳过，让同色下一个顶上
+  // 每个颜色只保留最早放置（FIFO）且仍需派发的食物
   const earliestByColor = new Map();
   for (const food of activeFoods) {
     if (food.remaining - food.attracted <= 0) continue;
@@ -213,7 +326,6 @@ function doBFS() {
     if (!cur || food.seq < cur.seq) earliestByColor.set(food.color, food);
   }
   const foods = [...earliestByColor.values()];
-  // 优先填满剩余最少的食物
   foods.sort((a, b) => a.remaining - b.remaining);
   let anyNew = false;
   for (const food of foods) {
@@ -228,8 +340,8 @@ function doBFS() {
     animals.sort((a, b) => a.distance - b.distance);
     for (const att of animals) {
       const rawPath = b.tracePath(att.row, att.col);
-      rawPath.shift();                        // 去掉动物自身格
-      const path = b.smoothPath(rawPath);     // 字符串拉紧成任意角度直线段
+      rawPath.shift();
+      const path = b.smoothPath(rawPath);
       if (path.length > 0) path[path.length - 1].isFood = true;
       grid[att.row][att.col] = -1;
       remainingAnimals--;
@@ -237,10 +349,10 @@ function doBFS() {
       markBlankBroadcast(att.row, att.col);
       movingAnimals.push({
         color: food.color, originRow: att.row, originCol: att.col,
-        x: BOARD_MARGIN + att.col * CELL + CELL / 2,          // 连续像素坐标，起点在动物格中心
+        x: BOARD_MARGIN + att.col * CELL + CELL / 2,
         y: TOP_MARGIN + att.row * CELL + CELL / 2,
         path: path,
-        speed: TARGET_W / 30 * 0.5,           // 屏幕绝对速度（像素/基准帧），不随棋盘大小变化
+        speed: TARGET_W / 30 * 0.5,
         targetFood: food,
       });
     }
@@ -255,192 +367,360 @@ class GameScene extends Phaser.Scene {
   }
 
   create() {
-    // 创建图形层
-    // 棋盘烘焙到离屏纹理（boardImg），动物层与 UI 层仍用 Graphics 逐帧绘制
     this.boardImg = null;
     this.boardTex = null;
-    this.animalGfx = this.add.graphics();
-    this.uiGfx = this.add.graphics();
-    // 木纹边框（4 条 tileSprite，置于棋盘之下）
-    this.makeWoodTexture();
-    this.borderTiles = [];
-    for (let i = 0; i < 4; i++) {
-      this.borderTiles.push(this.add.tileSprite(0, 0, 1, 1, 'wood').setOrigin(0, 0).setDepth(-1));
-    }
-    this.msgText = this.add.text(CANVAS_W / 2, CANVAS_H / 2 - Math.round(32 * UI_SCALE), '', {
-      fontSize: Math.round(22 * UI_SCALE) + 'px', color: '#333333', fontFamily: 'sans-serif', fontStyle: 'bold',
-      align: 'center',
-    }).setOrigin(0.5).setDepth(4).setVisible(false);
 
-    // 创建食物标签（盘子上）
+    // 背景、画框、阴影、黄铜内线
+    this.bgGfx = this.add.graphics().setDepth(-10);
+    this.frameShadow = this.add.graphics().setDepth(-2);
+    this.makeWoodTexture('woodH', true);
+    this.makeWoodTexture('woodV', false);
+    this.borderTiles = [];
+    const woodKeys = ['woodH', 'woodH', 'woodV', 'woodV'];
+    for (let i = 0; i < 4; i++) {
+      this.borderTiles.push(this.add.tileSprite(0, 0, 1, 1, woodKeys[i]).setOrigin(0, 0).setDepth(-1));
+    }
+    this.frameAccent = this.add.graphics().setDepth(-0.4);
+
+    // 动物层与 UI 层
+    this.animalGfx = this.add.graphics().setDepth(-0.35);
+    this.uiGfx = this.add.graphics().setDepth(0);
+
+    // 顶栏
+    this.buildTopBar();
+
+    // 盘子与队列文字
     this.foodLabels = [];
     for (let i = 0; i < 6; i++) {
-      const t = this.add.text(0, 0, '', {
-        fontSize: Math.round(12 * UI_SCALE) + 'px', color: '#ffffff', fontFamily: 'monospace', fontStyle: 'bold',
-      }).setOrigin(0.5).setStroke('#000000', 3);
-      this.foodLabels.push(t);
+      this.foodLabels.push(this.add.text(0, 0, '', {
+        fontSize: Math.round(13 * UI_SCALE) + 'px', color: '#FFFFFF',
+        fontFamily: FONT_NUM, fontStyle: 'bold',
+      }).setOrigin(0.5).setDepth(6));
     }
-
-    // 创建队列食物标签（4 队列 × 3 槽位）
     this.queueLabels = [];
     for (let qi = 0; qi < 4; qi++) {
       this.queueLabels[qi] = [];
-      for (let fi = 0; fi < 3; fi++) {
-        const t = this.add.text(0, 0, '', {
-          fontSize: Math.round(11 * UI_SCALE) + 'px', color: '#ffffff', fontFamily: 'monospace', fontStyle: 'bold',
-        }).setOrigin(0.5).setStroke('#000000', 3);
-        this.queueLabels[qi].push(t);
+      for (let fi = 0; fi < 2; fi++) {
+        this.queueLabels[qi].push(this.add.text(0, 0, '', {
+          fontSize: Math.round(12 * UI_SCALE) + 'px', color: '#FFFFFF',
+          fontFamily: FONT_NUM, fontStyle: 'bold',
+        }).setOrigin(0.5).setDepth(6));
       }
     }
+    this.hiddenLabels = [];
+    for (let qi = 0; qi < 4; qi++) {
+      this.hiddenLabels.push(this.add.text(0, 0, '', {
+        fontSize: Math.round(10 * UI_SCALE) + 'px', color: '#A99C8C',
+        fontFamily: FONT_UI, fontStyle: 'bold',
+      }).setOrigin(0.5).setDepth(6));
+    }
+
+    // 底部工具栏
+    this.toolGfx = this.add.graphics().setDepth(5);
+    this.buildToolbar();
+
+    // 开始页
+    this.buildStartScreen();
+
+    // 设置、清盘、结算
+    this.buildSettingsBox();
+    this.buildClearDialog();
+    this.buildVictoryBox();
 
     // 输入
     this.input.on('pointerdown', this.onPointerDown.bind(this));
+    if (this.input.keyboard) {
+      this.input.keyboard.on('keydown-S', () => {
+        if (this.canAct()) { this.onReshuffle(); this.flashButton(this.btnReshuffle); }
+      });
+      this.input.keyboard.on('keydown-R', () => {
+        if (this.canAct()) { this.resetGame(); this.flashButton(this.btnRestartIcon); }
+      });
+      this.input.keyboard.on('keydown-SPACE', () => {
+        if (this.canAct()) { this.onSpeed(); this.flashButton(this.btnSpeed); }
+      });
+      this.input.keyboard.on('keydown-ESC', () => {
+        if (this.settingsBox.visible) this.closeSettings();
+      });
+    }
 
-    // 道具按钮（洗牌图标）
-    this.btnReshuffle = this.makeShuffleButton(CANVAS_W / 2, CANVAS_H - Math.round(30 * UI_SCALE), Math.round(20 * UI_SCALE), 0xe94560)
-      .on('pointerdown', () => this.onReshuffle());
-
-    // 再来一局按钮（初始隐藏）
-    this.btnRestart = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + Math.round(42 * UI_SCALE), '再来一局', 0x27ae60, 18)
-      .setDepth(4)
-      .on('pointerdown', () => this.resetGame())
-      .setVisible(false);
-
-    // 下一关按钮（关卡模式通关时替代「再来一局」，初始隐藏）
-    this.btnNext = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + Math.round(42 * UI_SCALE), '下一关', 0xe94560, 18)
-      .setDepth(4)
-      .on('pointerdown', () => this.onNextLevel())
-      .setVisible(false);
-
-    // 2 倍速开关（底部右侧）
-    this.btnSpeed = this.add.container(CANVAS_W - Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
-    this.speedBg = this.add.graphics();
-    this.speedLabel = this.add.text(0, 0, '1x', {
-      fontSize: Math.round(16 * UI_SCALE) + 'px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
-    }).setOrigin(0.5).setStroke('#2c3e50', Math.max(2, Math.round(UI_SCALE / 3)));
-    const r = Math.round(18 * UI_SCALE);
-    const size = Math.round(r * 2.7);
-    this.speedBg.fillStyle(0x3498db);
-    this.speedBg.fillCircle(0, 0, r);
-    this.speedBg.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), 0x2c3e50, 1);
-    this.speedBg.strokeCircle(0, 0, r);
-    this.btnSpeed.add([this.speedBg, this.speedLabel]);
-    this.btnSpeed.setSize(size, size);
-    this.btnSpeed.setInteractive({
-      hitArea: new Phaser.Geom.Rectangle(0, 0, size, size),
-      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
-      useHandCursor: true,
-    });
-    this.btnSpeed.on('pointerdown', () => {
-      speedMultiplier = speedMultiplier === 1 ? 2 : 1;
-      this.speedLabel.setText(speedMultiplier + 'x');
-      this.speedBg.clear();
-      this.speedBg.fillStyle(speedMultiplier === 2 ? 0xe94560 : 0x3498db);
-      this.speedBg.fillCircle(0, 0, r);
-      this.speedBg.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), 0x2c3e50, 1);
-      this.speedBg.strokeCircle(0, 0, r);
-    });
-
-    // 左上角：当前关卡（直接打开、没有 ?level= 时是自由模式）
-    const levelLabel = URL_LEVEL ? '第 ' + URL_LEVEL + ' 关' : '自由模式';
-    const lvText = this.add.text(34, 37, levelLabel, {
-      fontSize: Math.round(17 * UI_SCALE) + 'px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
-    }).setOrigin(0, 0.5).setDepth(1.6).setStroke('#000000', 3);
-    const lvBg = this.add.graphics().setDepth(1.5);
-    const lvW = Math.ceil(lvText.width) + 28;
-    lvBg.fillStyle(0x000000, 0.55);
-    lvBg.fillRoundedRect(20, 20, lvW, 34, 17);
-    lvBg.lineStyle(2, 0xffffff, 0.25);
-    lvBg.strokeRoundedRect(20, 20, lvW, 34, 17);
-
-    // 启动
+    // 状态
     this.gameInited = false;
     this.dialogShown = false;
+    this.platePulse = [0, 0, 0, 0, 0, 0];
+    this.remainShown = -1;
 
-    // 开始界面
-    this.startOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.7)
-    .setInteractive();
-
-    this.loadingText = this.add.text(CANVAS_W / 2, CANVAS_H / 2 - 60, '正在加载图片...', {
-      fontSize: '18px', color: '#888888', fontFamily: 'sans-serif',
-    }).setOrigin(0.5);
-
-    this.btnStart = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2, '开始游戏', 0xe94560, 32)
-      .setDepth(1).setVisible(false)
-      .on('pointerdown', () => this.startNow());
-
-    // 设置按钮（齿轮图标，常驻左下角）
-    this.btnSettings = this.makeGearButton(Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE), Math.round(18 * UI_SCALE), 0x3498db)
-      .setDepth(1)
-      .on('pointerdown', () => this.openSettings());
-    // 重启图标按钮（↻，常驻设置齿轮右边）
-    this.btnRestartIcon = this.makeRestartButton(Math.round(110 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE), Math.round(18 * UI_SCALE), 0x27ae60)
-      .setDepth(1)
-      .on('pointerdown', () => { this.closeSettings(); this.resetGame(); });
-
-    // 设置面板
-    this.settingsOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.7)
-      .setVisible(false).setInteractive().setDepth(10);
-    this.settingsPanel = this.add.graphics().setDepth(10.5).setVisible(false);
-    this.settingsTitle = this.add.text(CANVAS_W / 2, CANVAS_H / 2 - Math.round(145 * UI_SCALE), '棋盘大小', {
-      fontSize: Math.round(24 * UI_SCALE) + 'px', color: '#333333', fontFamily: 'sans-serif', fontStyle: 'bold',
-    }).setOrigin(0.5).setDepth(11).setVisible(false);
-    this.sizeButtons = [];
-    [20, 30, 50, 100].forEach((n, i) => {
-      const btn = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 - Math.round(100 * UI_SCALE) + i * Math.round(44 * UI_SCALE), n + '×' + n, 0x3498db, 16)
-        .setDepth(11).setVisible(false)
-        .on('pointerdown', () => this.applyBoardSize(n));
-      this.sizeButtons.push(btn);
-    });
-    this.btnSettingsClose = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + Math.round(126 * UI_SCALE), '关闭', 0x95a5a6, 14)
-      .setDepth(11).setVisible(false)
-      .on('pointerdown', () => this.closeSettings());
-
-    // 加载随机图片
     this.loadRandomImage();
-
-    // 清盘提示对话框（初始隐藏）
-    this.dialogOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.7)
-    .setVisible(false).setInteractive().setDepth(2);
-
-    // 白色圆角面板背景
-    this.dialogPanel = this.add.graphics().setDepth(3).setVisible(false);
-
-    this.dialogText = this.add.text(CANVAS_W / 2, CANVAS_H / 2 - Math.round(32 * UI_SCALE), '', {
-      fontSize: Math.round(18 * UI_SCALE) + 'px', color: '#333333', fontFamily: 'sans-serif',
-      align: 'center',
-    }).setOrigin(0.5).setDepth(4).setVisible(false);
-
-    this.dialogConfirm = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + Math.round(42 * UI_SCALE), '确定', 0xe94560, 18)
-      .setDepth(4).setVisible(false)
-      .on('pointerdown', () => this.onClearPlates());
-
-    // 胜利 / 游戏结束弹窗（白色面板 + 再来一局）
-    this.victoryOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x000000, 0.7)
-      .setVisible(false).setInteractive().setDepth(2);
-    this.victoryPanel = this.add.graphics().setDepth(3).setVisible(false);
   }
 
-  // 卡通风格按钮：圆角胶囊 + 粗描边 + 投影 + 白字黑边
+  // ============ 背景与画框 ============
+  drawBackground() {
+    const g = this.bgGfx;
+    g.clear();
+    g.fillGradientStyle(C.nightTop, C.nightTop, C.nightBottom, C.nightBottom, 1, 1, 1, 1);
+    g.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    const glowR = Math.max(CANVAS_W, CANVAS_H) * 0.55;
+    g.fillStyle(C.amber, 0.030);
+    g.fillCircle(CANVAS_W / 2, TOP_MARGIN + ROWS * CELL * 0.45, glowR);
+    g.fillStyle(C.amber, 0.018);
+    g.fillCircle(CANVAS_W / 2, TOP_MARGIN + ROWS * CELL * 0.45, glowR * 0.68);
+  }
+
+  makeWoodTexture(key, horizontal) {
+    if (this.textures.exists(key)) return key;
+    const size = 128;
+    const tex = this.textures.createCanvas(key, size, size);
+    const ctx = tex.context;
+    ctx.fillStyle = '#5A3A24';
+    ctx.fillRect(0, 0, size, size);
+    // 细木纹：周期函数，避免贴图接缝
+    for (let i = 0; i < 16; i++) {
+      const base = i * 8;
+      ctx.strokeStyle = i % 2 ? '#4A2E1B' : '#6B452A';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let t = 0; t <= size; t += 4) {
+        const wobble = Math.sin(t * 0.09817477 * 2 + i) * 2.5;
+        const x = horizontal ? t : base + wobble;
+        const y = horizontal ? base + wobble : t;
+        if (t === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    // 一道很淡的暖色高光，让木框有打磨过的感觉
+    ctx.fillStyle = 'rgba(255, 220, 170, 0.035)';
+    for (let i = 0; i < 4; i++) {
+      ctx.fillRect(0, i * 32, size, 2);
+    }
+    tex.refresh();
+    return key;
+  }
+
+  layoutWoodBorder() {
+    if (!this.borderTiles) return;
+    const T = Math.round(14 * UI_SCALE);
+    const bw = COLS * CELL;
+    const bh = ROWS * CELL;
+    const x = BOARD_MARGIN - T;
+    const y = TOP_MARGIN - T;
+    this.borderTiles[0].setPosition(x, y).setSize(bw + 2 * T, T);
+    this.borderTiles[1].setPosition(x, y + T + bh).setSize(bw + 2 * T, T);
+    this.borderTiles[2].setPosition(x, y + T).setSize(T, bh);
+    this.borderTiles[3].setPosition(x + T + bw, y + T).setSize(T, bh);
+
+    // 画框外侧的柔和投影
+    const sh = this.frameShadow;
+    sh.clear();
+    for (let i = 0; i < 5; i++) {
+      sh.fillStyle(0x000000, 0.05);
+      sh.fillRoundedRect(
+        x - 10 * UI_SCALE - i * 4 * UI_SCALE,
+        y - 6 * UI_SCALE + i * 3 * UI_SCALE,
+        bw + 2 * T + 20 * UI_SCALE + i * 8 * UI_SCALE,
+        bh + 2 * T + 12 * UI_SCALE + i * 6 * UI_SCALE,
+        18 * UI_SCALE + i * 4 * UI_SCALE
+      );
+    }
+  }
+
+  drawFrameAccent() {
+    const g = this.frameAccent;
+    g.clear();
+    const bw = COLS * CELL;
+    const bh = ROWS * CELL;
+    g.lineStyle(2, C.brass, 0.75);
+    g.strokeRect(BOARD_MARGIN - 1, TOP_MARGIN - 1, bw + 2, bh + 2);
+    g.lineStyle(1, 0x000000, 0.35);
+    g.strokeRect(BOARD_MARGIN - 3 * UI_SCALE, TOP_MARGIN - 3 * UI_SCALE,
+      bw + 6 * UI_SCALE, bh + 6 * UI_SCALE);
+  }
+
+  // ============ 动物徽记 ============
+  // 每个颜色组对应一只动物：移动中的动物是「彩色圆章 + 奶油色动物剪影」，
+  // 食盆和队列用同一个剪影做小徽记，玩家可以从颜色和动物两条线索认盘。
+  buildAnimalMedallions() {
+    if (this.animalPool) return;
+    const SIL = 96;
+    for (let i = 0; i < COLORS.length; i++) {
+      const animal = animalCache.get(COLOR_ANIMALS[i]);
+      // 浅色上用深剪影，深色上用奶油剪影，保证动物在每一种色块上都看得见
+      const silColor = COLOR_INK[i] === '#FFFFFF' ? '#F5EFE4' : '#241C15';
+      const silCanvas = document.createElement('canvas');
+      silCanvas.width = SIL;
+      silCanvas.height = SIL;
+      const sctx = silCanvas.getContext('2d');
+      if (animal) {
+        const scale = Math.min(88 / animal.width, 88 / animal.height);
+        const w = animal.width * scale;
+        const h = animal.height * scale;
+        sctx.drawImage(animal, (SIL - w) / 2, (SIL - h) / 2, w, h);
+        sctx.globalCompositeOperation = 'source-in';
+        sctx.fillStyle = silColor;
+        sctx.fillRect(0, 0, SIL, SIL);
+      } else {
+        // 素材加载失败时的爪印兜底
+        sctx.fillStyle = silColor;
+        sctx.beginPath(); sctx.arc(48, 56, 15, 0, Math.PI * 2); sctx.fill();
+        sctx.beginPath(); sctx.arc(26, 36, 7, 0, Math.PI * 2); sctx.fill();
+        sctx.beginPath(); sctx.arc(41, 26, 7, 0, Math.PI * 2); sctx.fill();
+        sctx.beginPath(); sctx.arc(56, 26, 7, 0, Math.PI * 2); sctx.fill();
+        sctx.beginPath(); sctx.arc(70, 36, 7, 0, Math.PI * 2); sctx.fill();
+      }
+
+      const silKey = 'animalSil_' + i;
+      if (!this.textures.exists(silKey)) {
+        const silTex = this.textures.createCanvas(silKey, SIL, SIL);
+        silTex.context.drawImage(silCanvas, 0, 0);
+        silTex.refresh();
+      }
+
+      const medalKey = 'animalMedal_' + i;
+      if (!this.textures.exists(medalKey)) {
+        const S = 128;
+        const tex = this.textures.createCanvas(medalKey, S, S);
+        const ctx = tex.context;
+        ctx.clearRect(0, 0, S, S);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.beginPath(); ctx.arc(64, 68, 58, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#' + DARK_COLORS[i].toString(16).padStart(6, '0');
+        ctx.beginPath(); ctx.arc(64, 64, 60, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#' + COLORS[i].toString(16).padStart(6, '0');
+        ctx.beginPath(); ctx.arc(64, 64, 54, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.14)';
+        ctx.beginPath(); ctx.ellipse(50, 42, 26, 15, -0.5, 0, Math.PI * 2); ctx.fill();
+        ctx.drawImage(silCanvas, 16, 16, SIL, SIL);
+        ctx.strokeStyle = 'rgba(20,16,12,0.55)';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(64, 64, 60, 0, Math.PI * 2); ctx.stroke();
+        tex.refresh();
+      }
+    }
+
+    // 移动中的动物：图片池复用，避免每帧创建对象
+    this.animalPool = [];
+    for (let i = 0; i < 320; i++) {
+      this.animalPool.push(this.add.image(0, 0, 'animalMedal_0').setDepth(-0.3).setVisible(false));
+    }
+    // 食盆与队列的动物小徽记
+    this.plateIcons = [];
+    for (let i = 0; i < 6; i++) {
+      this.plateIcons.push(this.add.image(0, 0, 'animalSil_0').setDepth(5).setVisible(false));
+    }
+    this.queueIcons = [];
+    for (let qi = 0; qi < 4; qi++) {
+      this.queueIcons[qi] = [];
+      for (let fi = 0; fi < 2; fi++) {
+        this.queueIcons[qi].push(this.add.image(0, 0, 'animalSil_0').setDepth(5).setVisible(false));
+      }
+    }
+  }
+
+  // ============ 顶栏 ============
+  buildTopBar() {
+    this.levelBg = this.add.graphics().setDepth(7);
+    this.levelText = this.add.text(0, 0, '', {
+      fontSize: Math.round(14 * UI_SCALE) + 'px', color: '#F5EFE6',
+      fontFamily: FONT_DISPLAY, fontStyle: 'bold',
+    }).setOrigin(0, 0.5).setDepth(8);
+    this.remainBg = this.add.graphics().setDepth(7);
+    this.remainText = this.add.text(0, 0, '', {
+      fontSize: Math.round(14 * UI_SCALE) + 'px', color: '#F5EFE6',
+      fontFamily: FONT_UI, fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(8);
+    this.sizeBg = this.add.graphics().setDepth(7);
+    this.sizeText = this.add.text(0, 0, '', {
+      fontSize: Math.round(12 * UI_SCALE) + 'px', color: '#A99C8C',
+      fontFamily: FONT_NUM, fontStyle: 'bold',
+    }).setOrigin(1, 0.5).setDepth(8);
+  }
+
+  drawPill(g, x, y, w, h, r) {
+    g.fillStyle(0x14100C, 0.72);
+    g.fillRoundedRect(x, y, w, h, r);
+    g.lineStyle(1, C.amber, 0.16);
+    g.strokeRoundedRect(x, y, w, h, r);
+  }
+
+  updateTopBar() {
+    if (!this.levelText) return;
+    const y = 10 * UI_SCALE;
+    const h = 40 * UI_SCALE;
+    const r = 20 * UI_SCALE;
+
+    const label = URL_LEVEL ? '动物消除 · 第 ' + URL_LEVEL + ' 关' : '动物消除 · 自由模式';
+    this.levelText.setText(label);
+    const lw = Math.ceil(this.levelText.width) + 38 * UI_SCALE;
+    this.levelBg.clear();
+    this.drawPill(this.levelBg, 20 * UI_SCALE, y, lw, h, r);
+    this.levelBg.fillStyle(C.amber, 0.9);
+    this.levelBg.fillCircle(33 * UI_SCALE, 30 * UI_SCALE, 3 * UI_SCALE);
+    this.levelText.setPosition(42 * UI_SCALE, 30 * UI_SCALE);
+
+    this.remainText.setText('剩余 ' + remainingAnimals);
+    const rw = Math.ceil(this.remainText.width) + 32 * UI_SCALE;
+    this.remainBg.clear();
+    this.drawPill(this.remainBg, CANVAS_W / 2 - rw / 2, y, rw, h, r);
+    this.remainText.setPosition(CANVAS_W / 2, 30 * UI_SCALE);
+
+    this.sizeText.setText(COLS + '×' + ROWS);
+    const sw = Math.ceil(this.sizeText.width) + 28 * UI_SCALE;
+    this.sizeBg.clear();
+    this.drawPill(this.sizeBg, CANVAS_W - 20 * UI_SCALE - sw, y, sw, h, r);
+    this.sizeText.setPosition(CANVAS_W - 34 * UI_SCALE, 30 * UI_SCALE);
+  }
+
+  // ============ 工具栏 ============
+  buildToolbar() {
+    this.btnSettings = this.makeGearButton(0, 0, Math.round(18 * UI_SCALE))
+      .setDepth(6)
+      .on('pointerdown', () => this.openSettings());
+    this.btnRestartIcon = this.makeRestartButton(0, 0, Math.round(18 * UI_SCALE))
+      .setDepth(6)
+      .on('pointerdown', () => {
+        if (!this.canAct()) return;
+        this.closeSettings();
+        this.resetGame();
+      });
+    this.btnReshuffle = this.makeShuffleButton(0, 0, Math.round(22 * UI_SCALE))
+      .setDepth(6)
+      .on('pointerdown', () => this.onReshuffle());
+    this.btnSpeed = this.makeSpeedButton(0, 0)
+      .setDepth(6);
+  }
+
+  drawToolbar() {
+    const g = this.toolGfx;
+    g.clear();
+    const cy = CANVAS_H - Math.round(32 * UI_SCALE);
+    const h = 56 * UI_SCALE;
+    g.fillStyle(0x1E1813, 0.9);
+    g.fillRoundedRect(16 * UI_SCALE, cy - h / 2, CANVAS_W - 32 * UI_SCALE, h, 24 * UI_SCALE);
+    g.lineStyle(1, C.amber, 0.12);
+    g.strokeRoundedRect(16 * UI_SCALE, cy - h / 2, CANVAS_W - 32 * UI_SCALE, h, 24 * UI_SCALE);
+  }
+
+  // 卡通主按钮：琥珀底 + 深墨字 + 细边 + 轻微高光
   makeCartoonButton(x, y, label, fill, fontSize) {
     fontSize = Math.round(fontSize * UI_SCALE);
-    const padX = fontSize * 1.2;
+    const padX = fontSize * 1.4;
     const w = label.length * fontSize + padX * 2;
-    const h = fontSize + fontSize * 1.3;
+    const h = fontSize + fontSize * 1.2;
     const r = h / 2;
-    const border = Math.max(3, Math.round(fontSize / 6));
     const c = this.add.container(x, y);
     const shadow = this.add.graphics();
-    shadow.fillStyle(0x000000, 0.22);
-    shadow.fillRoundedRect(-w / 2 + 4, -h / 2 + 5, w, h, r);
+    shadow.fillStyle(0x000000, 0.18);
+    shadow.fillRoundedRect(-w / 2 + 2, -h / 2 + 4, w, h, r);
     const body = this.add.graphics();
-    body.fillStyle(fill);
+    body.fillStyle(fill, 1);
     body.fillRoundedRect(-w / 2, -h / 2, w, h, r);
-    body.lineStyle(border, 0x2c3e50, 1);
+    body.lineStyle(1, fill === C.amber ? C.amberSoft : C.line, 1);
     body.strokeRoundedRect(-w / 2, -h / 2, w, h, r);
+    body.fillStyle(0xFFFFFF, 0.14);
+    body.fillRoundedRect(-w / 2 + 6, -h / 2 + 4, w - 12, h * 0.36, r * 0.8);
     const t = this.add.text(0, 0, label, {
-      fontSize: fontSize + 'px', color: '#ffffff', fontFamily: 'sans-serif', fontStyle: 'bold',
-    }).setOrigin(0.5).setStroke('#2c3e50', Math.max(2, Math.round(fontSize / 10)));
+      fontSize: fontSize + 'px', color: '#241C15',
+      fontFamily: FONT_UI, fontStyle: 'bold',
+    }).setOrigin(0.5);
     c.add([shadow, body, t]);
     c.setSize(w, h);
     c.setInteractive({
@@ -448,27 +728,64 @@ class GameScene extends Phaser.Scene {
       hitAreaCallback: Phaser.Geom.Rectangle.Contains,
       useHandCursor: true,
     });
+    c.on('pointerover', () => c.setScale(1.02));
+    c.on('pointerout', () => c.setScale(1));
+    c.on('pointerdown', () => c.setScale(0.97));
+    c.on('pointerup', () => c.setScale(1));
+    c.setLabel = (next) => { t.setText(next); };
     return c;
   }
 
-  // 齿轮图标按钮：主体圆 + 8 个齿 + 白色中心孔
-  makeGearButton(x, y, r, fill) {
+  makeGhostButton(x, y, label) {
+    const w = 110 * UI_SCALE;
+    const h = 38 * UI_SCALE;
+    const c = this.add.container(x, y);
+    const bg = this.add.graphics();
+    bg.fillStyle(C.paperDeep, 1);
+    bg.fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    bg.lineStyle(1, C.paperLine, 1);
+    bg.strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    const t = this.add.text(0, 0, label, {
+      fontSize: Math.round(14 * UI_SCALE) + 'px', color: '#2A231D',
+      fontFamily: FONT_UI, fontStyle: 'bold',
+    }).setOrigin(0.5);
+    c.add([bg, t]);
+    c.setSize(w, h);
+    c.setInteractive({
+      hitArea: new Phaser.Geom.Rectangle(0, 0, w, h),
+      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+      useHandCursor: true,
+    });
+    c.on('pointerover', () => c.setScale(1.03));
+    c.on('pointerout', () => c.setScale(1));
+    c.on('pointerdown', () => c.setScale(0.96));
+    c.on('pointerup', () => c.setScale(1));
+    return c;
+  }
+
+  makeGearButton(x, y, r) {
     const size = Math.round(r * 2.7);
     const c = this.add.container(x, y);
     const shadow = this.add.graphics();
-    shadow.fillStyle(0x000000, 0.22);
-    shadow.fillCircle(4, 5, r * 1.35);
+    shadow.fillStyle(0x000000, 0.3);
+    shadow.fillCircle(0, 3, r);
     const body = this.add.graphics();
-    body.fillStyle(fill);
+    body.fillStyle(C.surfaceHi, 1);
+    body.fillCircle(0, 0, r);
+    body.lineStyle(1, C.line, 0.9);
+    body.strokeCircle(0, 0, r);
+    body.fillStyle(0xFFFFFF, 0.06);
+    body.fillCircle(0, -r * 0.32, r * 0.72);
+    // 琥珀色齿轮图标
+    const ir = r * 0.42;
+    body.fillStyle(C.amber, 1);
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
-      body.fillCircle(Math.cos(a) * r, Math.sin(a) * r, r * 0.32);
+      body.fillCircle(Math.cos(a) * ir, Math.sin(a) * ir, r * 0.12);
     }
-    body.fillCircle(0, 0, r);
-    body.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), 0x2c3e50, 1);
-    body.strokeCircle(0, 0, r);
-    body.fillStyle(0xffffff);
-    body.fillCircle(0, 0, r * 0.42);
+    body.fillCircle(0, 0, ir * 0.78);
+    body.fillStyle(C.surfaceHi, 1);
+    body.fillCircle(0, 0, ir * 0.30);
     c.add([shadow, body]);
     c.setSize(size, size);
     c.setInteractive({
@@ -476,73 +793,42 @@ class GameScene extends Phaser.Scene {
       hitAreaCallback: Phaser.Geom.Rectangle.Contains,
       useHandCursor: true,
     });
+    c.on('pointerover', () => c.setScale(1.05));
+    c.on('pointerout', () => c.setScale(1));
+    c.on('pointerdown', () => c.setScale(0.94));
+    c.on('pointerup', () => c.setScale(1));
     return c;
   }
 
-  // 洗牌图标按钮：圆底 + 标准上下交错箭头（↨ 风格）
-  makeShuffleButton(x, y, r, fill) {
+  makeRestartButton(x, y, r) {
     const size = Math.round(r * 2.7);
     const c = this.add.container(x, y);
     const shadow = this.add.graphics();
-    shadow.fillStyle(0x000000, 0.22);
-    shadow.fillCircle(4, 5, r * 1.35);
+    shadow.fillStyle(0x000000, 0.3);
+    shadow.fillCircle(0, 3, r);
     const body = this.add.graphics();
-    body.fillStyle(fill);
+    body.fillStyle(C.surfaceHi, 1);
     body.fillCircle(0, 0, r);
-    body.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), 0x2c3e50, 1);
+    body.lineStyle(1, C.line, 0.9);
     body.strokeCircle(0, 0, r);
-    const lw = Math.max(3, Math.round(3 * UI_SCALE));
-    const head = r * 0.35;
-    const gap = r * 0.15;
-    const len = r * 0.5;
-    // 上箭头：向右
-    this.drawArrow(body, -len, -gap, len, -gap, lw, head);
-    // 下箭头：向左
-    this.drawArrow(body, len, gap, -len, gap, lw, head);
-    c.add([shadow, body]);
-    c.setSize(size, size);
-    c.setInteractive({
-      hitArea: new Phaser.Geom.Rectangle(0, 0, size, size),
-      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
-      useHandCursor: true,
-    });
-    return c;
-  }
-
-  // 重启图标按钮：圆底 + 白色环形箭头（↻）
-  makeRestartButton(x, y, r, fill) {
-    const size = Math.round(r * 2.7);
-    const c = this.add.container(x, y);
-    const shadow = this.add.graphics();
-    shadow.fillStyle(0x000000, 0.22);
-    shadow.fillCircle(4, 5, r * 1.35);
-    const body = this.add.graphics();
-    body.fillStyle(fill);
-    body.fillCircle(0, 0, r);
-    body.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), 0x2c3e50, 1);
-    body.strokeCircle(0, 0, r);
-    // 白色环形箭头（3/4 圆弧 + 箭头三角）
-    const lw = Math.max(2, Math.round(2 * UI_SCALE));
-    const rr = r * 0.55;
-    body.lineStyle(lw, 0xffffff, 0.9);
-    const steps = 16;
-    const arcSteps = 12;
+    body.fillStyle(0xFFFFFF, 0.06);
+    body.fillCircle(0, -r * 0.32, r * 0.72);
+    // 琥珀色环形箭头
+    const rr = r * 0.52;
+    body.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), C.amber, 0.95);
+    const steps = 16, arcSteps = 12;
     for (let i = 0; i < arcSteps; i++) {
       const a1 = (i / steps) * Math.PI * 2 - Math.PI / 2;
       const a2 = ((i + 1) / steps) * Math.PI * 2 - Math.PI / 2;
       body.lineBetween(Math.cos(a1) * rr, Math.sin(a1) * rr, Math.cos(a2) * rr, Math.sin(a2) * rr);
     }
-    const endAngle = (arcSteps / steps) * Math.PI * 2 - Math.PI / 2;
-    const ex = Math.cos(endAngle) * rr;
-    const ey = Math.sin(endAngle) * rr;
-    const tangent = endAngle + Math.PI / 2;
-    const head = r * 0.25;
-    body.fillStyle(0xffffff);
-    body.fillTriangle(
-      ex, ey,
-      ex + Math.cos(tangent + 0.6) * head, ey + Math.sin(tangent + 0.6) * head,
-      ex + Math.cos(tangent - 0.6) * head, ey + Math.sin(tangent - 0.6) * head
-    );
+    const endA = (arcSteps / steps) * Math.PI * 2 - Math.PI / 2;
+    const ex = Math.cos(endA) * rr, ey = Math.sin(endA) * rr;
+    const tan = endA + Math.PI / 2, head = r * 0.24;
+    body.fillStyle(C.amber);
+    body.fillTriangle(ex, ey,
+      ex + Math.cos(tan + 0.6) * head, ey + Math.sin(tan + 0.6) * head,
+      ex + Math.cos(tan - 0.6) * head, ey + Math.sin(tan - 0.6) * head);
     c.add([shadow, body]);
     c.setSize(size, size);
     c.setInteractive({
@@ -550,45 +836,624 @@ class GameScene extends Phaser.Scene {
       hitAreaCallback: Phaser.Geom.Rectangle.Contains,
       useHandCursor: true,
     });
+    c.on('pointerover', () => c.setScale(1.05));
+    c.on('pointerout', () => c.setScale(1));
+    c.on('pointerdown', () => c.setScale(0.94));
+    c.on('pointerup', () => c.setScale(1));
     return c;
   }
 
-  // 在 Graphics 上画一条带三角形箭头的线段
-  drawArrow(g, x1, y1, x2, y2, lineWidth, headLen) {
-    g.lineStyle(lineWidth, 0xffffff, 1);
-    g.lineBetween(x1, y1, x2, y2);
-    const ang = Math.atan2(y2 - y1, x2 - x1);
-    const a1 = ang + Math.PI * 0.85;
-    const a2 = ang - Math.PI * 0.85;
-    g.fillStyle(0xffffff);
-    g.fillTriangle(
-      x2, y2,
-      x2 + Math.cos(a1) * headLen, y2 + Math.sin(a1) * headLen,
-      x2 + Math.cos(a2) * headLen, y2 + Math.sin(a2) * headLen
-    );
+  makeShuffleButton(x, y, r) {
+    const size = Math.round(r * 2.7);
+    const c = this.add.container(x, y);
+    const shadow = this.add.graphics();
+    shadow.fillStyle(0x000000, 0.3);
+    shadow.fillCircle(0, 3, r);
+    const body = this.add.graphics();
+    body.fillStyle(C.amber, 1);
+    body.fillCircle(0, 0, r);
+    body.lineStyle(2, C.amberSoft, 1);
+    body.strokeCircle(0, 0, r);
+    body.fillStyle(0xFFFFFF, 0.16);
+    body.fillCircle(0, -r * 0.32, r * 0.72);
+    const lw = Math.max(3, Math.round(3 * UI_SCALE));
+    const head = r * 0.35;
+    const gap = r * 0.15;
+    const len = r * 0.5;
+    this.drawArrow(body, -len, -gap, len, -gap, lw, head, C.ink);
+    this.drawArrow(body, len, gap, -len, gap, lw, head, C.ink);
+    c.add([shadow, body]);
+    c.setSize(size, size);
+    c.setInteractive({
+      hitArea: new Phaser.Geom.Rectangle(0, 0, size, size),
+      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+      useHandCursor: true,
+    });
+    c.on('pointerover', () => c.setScale(1.04));
+    c.on('pointerout', () => c.setScale(1));
+    c.on('pointerdown', () => c.setScale(0.93));
+    c.on('pointerup', () => c.setScale(1));
+    return c;
   }
 
+  makeSpeedButton(x, y) {
+    const w = 76 * UI_SCALE;
+    const h = 38 * UI_SCALE;
+    const r = h / 2;
+    const c = this.add.container(x, y);
+    const body = this.add.graphics();
+    const t = this.add.text(0, 0, '倍速 1×', {
+      fontSize: Math.round(12 * UI_SCALE) + 'px', color: '#E0A44A',
+      fontFamily: FONT_UI, fontStyle: 'bold',
+    }).setOrigin(0.5);
+    const draw = () => {
+      body.clear();
+      const active = speedMultiplier === 2;
+      body.fillStyle(active ? C.amber : C.surfaceHi, 1);
+      body.fillRoundedRect(-w / 2, -h / 2, w, h, r);
+      body.lineStyle(1, active ? C.amberSoft : C.line, 1);
+      body.strokeRoundedRect(-w / 2, -h / 2, w, h, r);
+      if (!active) {
+        body.fillStyle(0xFFFFFF, 0.06);
+        body.fillRoundedRect(-w / 2 + 4, -h / 2 + 3, w - 8, h * 0.36, r * 0.7);
+      }
+      t.setColor(active ? '#241C15' : '#E0A44A');
+      t.setText('倍速 ' + speedMultiplier + '×');
+    };
+    draw();
+    c.add([body, t]);
+    c.setSize(w, h);
+    c.setInteractive({
+      hitArea: new Phaser.Geom.Rectangle(0, 0, w, h),
+      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+      useHandCursor: true,
+    });
+    c.on('pointerover', () => c.setScale(1.03));
+    c.on('pointerout', () => c.setScale(1));
+    c.on('pointerdown', () => { c.setScale(0.95); this.onSpeed(); });
+    c.on('pointerup', () => c.setScale(1));
+    c.speedRedraw = draw;
+    return c;
+  }
+
+  drawArrow(g, x1, y1, x2, y2, lineWidth, headLen, color) {
+    g.lineStyle(lineWidth, color, 1);
+    g.lineBetween(x1, y1, x2, y2);
+    const ang = Math.atan2(y2 - y1, x2 - x1);
+    g.fillStyle(color);
+    g.fillTriangle(x2, y2,
+      x2 + Math.cos(ang + Math.PI * 0.85) * headLen, y2 + Math.sin(ang + Math.PI * 0.85) * headLen,
+      x2 + Math.cos(ang - Math.PI * 0.85) * headLen, y2 + Math.sin(ang - Math.PI * 0.85) * headLen);
+  }
+
+  flashButton(btn) {
+    if (REDUCED || !btn) return;
+    this.tweens.killTweensOf(btn);
+    btn.setScale(1);
+    this.tweens.add({
+      targets: btn, scale: 1.12, duration: 90, yoyo: true, ease: 'Quad.easeOut',
+      onComplete: () => btn.setScale(1),
+    });
+  }
+
+  // ============ 开始页 ============
+  buildStartScreen() {
+    this.startBox = this.add.container(CANVAS_W / 2, CANVAS_H / 2).setDepth(10);
+    this.startScrim = this.add.rectangle(0, 0, CANVAS_W, CANVAS_H, 0x0B0806, 0.66).setInteractive();
+    this.startPanel = this.add.graphics();
+    this.startTitle = this.add.text(0, 0, '动物消除', {
+      fontSize: Math.round(38 * UI_SCALE) + 'px', color: '#2A231D',
+      fontFamily: FONT_DISPLAY, fontStyle: 'bold',
+    }).setOrigin(0.5);
+    this.startSubtitle = this.add.text(0, 0, '把同色动物送回对应的食盆', {
+      fontSize: Math.round(16 * UI_SCALE) + 'px', color: '#5A4C3D',
+      fontFamily: FONT_UI,
+    }).setOrigin(0.5);
+    this.startHint = this.add.text(0, 0, '点下方食盆，动物会自己找路', {
+      fontSize: Math.round(13 * UI_SCALE) + 'px', color: '#6E6252',
+      fontFamily: FONT_UI,
+    }).setOrigin(0.5);
+    this.loadingText = this.add.text(0, 0, '正在准备棋盘', {
+      fontSize: Math.round(13 * UI_SCALE) + 'px', color: '#6E6252',
+      fontFamily: FONT_UI,
+    }).setOrigin(0.5);
+    this.btnStart = this.makeCartoonButton(0, 0, '开始游戏', C.amber, 22)
+      .setVisible(false);
+    this.btnStart.on('pointerdown', () => this.startNow());
+    this.startBox.add([
+      this.startScrim, this.startPanel, this.startTitle, this.startSubtitle,
+      this.startHint, this.loadingText, this.btnStart,
+    ]);
+    this.layoutStartScreen();
+  }
+
+  layoutStartScreen() {
+    if (!this.startBox) return;
+    const w = Math.min(CANVAS_W - 80 * UI_SCALE, 560 * UI_SCALE);
+    const h = 340 * UI_SCALE;
+    this.startPanel.clear();
+    this.drawPaperPanel(this.startPanel, w, h, 20 * UI_SCALE);
+    this.startPanel.fillStyle(C.amber, 1);
+    this.startPanel.fillRoundedRect(-24 * UI_SCALE, -h / 2 + 138 * UI_SCALE, 48 * UI_SCALE, 3 * UI_SCALE, 1.5 * UI_SCALE);
+    this.startTitle.setPosition(0, -h / 2 + 70 * UI_SCALE);
+    this.startSubtitle.setPosition(0, -h / 2 + 112 * UI_SCALE);
+    this.startHint.setPosition(0, -h / 2 + 170 * UI_SCALE);
+    this.loadingText.setPosition(0, h / 2 - 86 * UI_SCALE);
+    this.btnStart.setPosition(0, h / 2 - 86 * UI_SCALE);
+    this.startScrim.setSize(CANVAS_W, CANVAS_H);
+  }
+
+  startNow() {
+    if (!this.startBox || !this.startBox.active) return;
+    this.startBox.destroy();
+    this.startBox = null;
+    gameRunning = true;
+  }
+
+  // ============ 纸卡面板 ============
+  drawPaperPanel(g, w, h, r) {
+    g.clear();
+    g.fillStyle(0x000000, 0.28);
+    g.fillRoundedRect(-w / 2 + 6 * UI_SCALE, -h / 2 + 8 * UI_SCALE, w, h, r);
+    g.fillStyle(C.paper, 1);
+    g.fillRoundedRect(-w / 2, -h / 2, w, h, r);
+    g.lineStyle(1, C.paperLine, 1);
+    g.strokeRoundedRect(-w / 2, -h / 2, w, h, r);
+  }
+
+  showBox(box) {
+    box.setVisible(true);
+    if (REDUCED) {
+      box.setAlpha(1).setScale(1);
+      return;
+    }
+    this.tweens.killTweensOf(box);
+    box.setAlpha(0).setScale(0.96);
+    this.tweens.add({
+      targets: box, alpha: 1, scale: 1, duration: 200, ease: 'Cubic.easeOut',
+    });
+  }
+
+  hideBox(box) {
+    this.tweens.killTweensOf(box);
+    box.setVisible(false);
+    box.setAlpha(1).setScale(1);
+  }
+
+  // ============ 清盘弹窗 ============
+  buildClearDialog() {
+    this.dialogOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x0B0806, 0.72)
+      .setVisible(false).setInteractive().setDepth(40);
+    this.dialogBox = this.add.container(CANVAS_W / 2, CANVAS_H / 2).setDepth(41).setVisible(false);
+    this.dialogPanel = this.add.graphics();
+    this.dialogTitle = this.add.text(0, 0, '盘子满了', {
+      fontSize: Math.round(24 * UI_SCALE) + 'px', color: '#2A231D',
+      fontFamily: FONT_DISPLAY, fontStyle: 'bold',
+    }).setOrigin(0.5);
+    this.dialogText = this.add.text(0, 0, '6 个食盆都装满了，先清空前三个，把食物放回队列？', {
+      fontSize: Math.round(17 * UI_SCALE) + 'px', color: '#5A4C3D',
+      fontFamily: FONT_UI, align: 'center', lineSpacing: 6,
+      wordWrap: { width: 356 * UI_SCALE, useAdvancedWrap: true },
+    }).setOrigin(0.5);
+    this.dialogConfirm = this.makeCartoonButton(0, 0, '清空盘子', C.amber, 18);
+    this.dialogConfirm.on('pointerdown', () => this.onClearPlates());
+    this.dialogBox.add([this.dialogPanel, this.dialogTitle, this.dialogText, this.dialogConfirm]);
+    this.layoutClearDialog();
+  }
+
+  layoutClearDialog() {
+    const w = 420 * UI_SCALE;
+    const h = 230 * UI_SCALE;
+    this.dialogPanel.clear();
+    this.drawPaperPanel(this.dialogPanel, w, h, 18 * UI_SCALE);
+    this.dialogPanel.fillStyle(C.amber, 1);
+    this.dialogPanel.fillRoundedRect(-24 * UI_SCALE, -h / 2 + 88 * UI_SCALE, 48 * UI_SCALE, 3 * UI_SCALE, 1.5 * UI_SCALE);
+    this.dialogTitle.setPosition(0, -h / 2 + 58 * UI_SCALE);
+    this.dialogText.setPosition(0, -4 * UI_SCALE);
+    this.dialogConfirm.setPosition(0, h / 2 - 56 * UI_SCALE);
+  }
+
+  showDialog() {
+    this.dialogShown = true;
+    this.dialogOverlay.setVisible(true);
+    this.showBox(this.dialogBox);
+  }
+
+  hideDialog() {
+    this.dialogShown = false;
+    this.dialogOverlay.setVisible(false);
+    this.hideBox(this.dialogBox);
+  }
+
+  // ============ 结算弹窗 ============
+  buildVictoryBox() {
+    this.victoryOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x0B0806, 0.72)
+      .setVisible(false).setInteractive().setDepth(44);
+    this.victoryBox = this.add.container(CANVAS_W / 2, CANVAS_H / 2).setDepth(45).setVisible(false);
+    this.victoryPanel = this.add.graphics();
+    this.victoryTitle = this.add.text(0, 0, '', {
+      fontSize: Math.round(24 * UI_SCALE) + 'px', color: '#2A231D',
+      fontFamily: FONT_DISPLAY, fontStyle: 'bold', align: 'center',
+    }).setOrigin(0.5);
+    this.victoryBody = this.add.text(0, 0, '', {
+      fontSize: Math.round(17 * UI_SCALE) + 'px', color: '#5A4C3D',
+      fontFamily: FONT_UI, align: 'center', lineSpacing: 6,
+      wordWrap: { width: 376 * UI_SCALE, useAdvancedWrap: true },
+    }).setOrigin(0.5);
+    this.btnNext = this.makeCartoonButton(0, 0, '下一关', C.amber, 18).setVisible(false);
+    this.btnRestart = this.makeCartoonButton(0, 0, '再来一局', C.amber, 18).setVisible(false);
+    this.btnNext.on('pointerdown', () => this.onNextLevel());
+    this.btnRestart.on('pointerdown', () => this.resetGame());
+    this.victoryBox.add([
+      this.victoryPanel, this.victoryTitle, this.victoryBody, this.btnNext, this.btnRestart,
+    ]);
+    this.layoutVictoryBox();
+  }
+
+  layoutVictoryBox() {
+    const w = 440 * UI_SCALE;
+    const h = 250 * UI_SCALE;
+    this.victoryPanel.clear();
+    this.drawPaperPanel(this.victoryPanel, w, h, 18 * UI_SCALE);
+    this.victoryPanel.fillStyle(C.amber, 1);
+    this.victoryPanel.fillRoundedRect(-24 * UI_SCALE, -h / 2 + 88 * UI_SCALE, 48 * UI_SCALE, 3 * UI_SCALE, 1.5 * UI_SCALE);
+    this.victoryTitle.setPosition(0, -h / 2 + 58 * UI_SCALE);
+    this.victoryBody.setPosition(0, -4 * UI_SCALE);
+    this.btnNext.setPosition(0, h / 2 - 58 * UI_SCALE);
+    this.btnRestart.setPosition(0, h / 2 - 58 * UI_SCALE);
+  }
+
+  showVictory(title, body, showNext) {
+    this.victoryTitle.setText(title);
+    this.victoryBody.setText(body);
+    this.btnNext.setVisible(showNext);
+    this.btnRestart.setVisible(!showNext);
+    this.victoryOverlay.setVisible(true);
+    this.showBox(this.victoryBox);
+  }
+
+  hideVictory() {
+    this.victoryOverlay.setVisible(false);
+    this.btnNext.setVisible(false);
+    this.btnRestart.setVisible(false);
+    this.hideBox(this.victoryBox);
+  }
+
+  // ============ 设置 ============
+  buildSettingsBox() {
+    this.settingsOverlay = this.add.rectangle(CANVAS_W / 2, CANVAS_H / 2, CANVAS_W, CANVAS_H, 0x0B0806, 0.72)
+      .setVisible(false).setInteractive().setDepth(30);
+    this.settingsBox = this.add.container(CANVAS_W / 2, CANVAS_H / 2).setDepth(31).setVisible(false);
+    this.settingsPanel = this.add.graphics();
+    this.settingsTitle = this.add.text(0, 0, '棋盘大小', {
+      fontSize: Math.round(24 * UI_SCALE) + 'px', color: '#2A231D',
+      fontFamily: FONT_DISPLAY, fontStyle: 'bold',
+    }).setOrigin(0.5);
+    this.settingsNote = this.add.text(0, 0, '最长边 · 切换后本局重新开始', {
+      fontSize: Math.round(12 * UI_SCALE) + 'px', color: '#6E6252',
+      fontFamily: FONT_UI,
+    }).setOrigin(0.5);
+    this.sizeButtons = [20, 30, 50, 100].map(n => this.makeSizeButton(n));
+    this.btnSettingsClose = this.makeGhostButton(0, 0, '关闭');
+    this.btnSettingsClose.on('pointerdown', () => this.closeSettings());
+    this.settingsBox.add([
+      this.settingsPanel, this.settingsTitle, this.settingsNote,
+      ...this.sizeButtons, this.btnSettingsClose,
+    ]);
+    this.layoutSettingsBox();
+  }
+
+  makeSizeButton(n) {
+    const w = 150 * UI_SCALE;
+    const h = 46 * UI_SCALE;
+    const c = this.add.container(0, 0);
+    const bg = this.add.graphics();
+    const t = this.add.text(0, 0, n + '×' + n, {
+      fontSize: Math.round(15 * UI_SCALE) + 'px', color: '#2A231D',
+      fontFamily: FONT_NUM, fontStyle: 'bold',
+    }).setOrigin(0.5);
+    c.add([bg, t]);
+    c.setSize(w, h);
+    c.setInteractive({
+      hitArea: new Phaser.Geom.Rectangle(0, 0, w, h),
+      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+      useHandCursor: true,
+    });
+    c.on('pointerdown', () => this.applyBoardSize(n));
+    c.sizeValue = n;
+    c.setSelected = (sel) => {
+      bg.clear();
+      bg.fillStyle(sel ? C.amber : C.paperDeep, 1);
+      bg.fillRoundedRect(-w / 2, -h / 2, w, h, 12 * UI_SCALE);
+      bg.lineStyle(1, sel ? C.amberSoft : C.paperLine, 1);
+      bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 12 * UI_SCALE);
+      if (sel) {
+        bg.fillStyle(0xFFFFFF, 0.14);
+        bg.fillRoundedRect(-w / 2 + 6 * UI_SCALE, -h / 2 + 4 * UI_SCALE,
+          w - 12 * UI_SCALE, h * 0.32, 8 * UI_SCALE);
+      }
+      t.setColor(sel ? '#241C15' : '#2A231D');
+    };
+    c.setSelected(false);
+    return c;
+  }
+
+  layoutSettingsBox() {
+    const w = 380 * UI_SCALE;
+    const h = 330 * UI_SCALE;
+    this.settingsPanel.clear();
+    this.drawPaperPanel(this.settingsPanel, w, h, 18 * UI_SCALE);
+    this.settingsTitle.setPosition(0, -h / 2 + 58 * UI_SCALE);
+    this.settingsNote.setPosition(0, -h / 2 + 92 * UI_SCALE);
+    const pos = [
+      [-78 * UI_SCALE, -24 * UI_SCALE], [78 * UI_SCALE, -24 * UI_SCALE],
+      [-78 * UI_SCALE, 30 * UI_SCALE], [78 * UI_SCALE, 30 * UI_SCALE],
+    ];
+    this.sizeButtons.forEach((b, i) => b.setPosition(pos[i][0], pos[i][1]));
+    this.btnSettingsClose.setPosition(0, h / 2 - 47 * UI_SCALE);
+  }
+
+  updateSizeButtons() {
+    if (!this.sizeButtons) return;
+    this.sizeButtons.forEach(b => b.setSelected(b.sizeValue === BOARD_MAX_DIM));
+  }
+
+  openSettings() {
+    if (!this.canAct()) return;
+    this.settingsOverlay.setVisible(true);
+    this.updateSizeButtons();
+    this.showBox(this.settingsBox);
+  }
+
+  closeSettings() {
+    this.settingsOverlay.setVisible(false);
+    this.hideBox(this.settingsBox);
+  }
+
+  // ============ 棋盘渲染 ============
+  drawGrid() {
+    if (this.boardImg) { this.boardImg.destroy(); this.boardImg = null; }
+    if (this.boardTex) { this.boardTex.destroy(); this.boardTex = null; }
+
+    const bw = COLS * CELL, bh = ROWS * CELL;
+    this.boardTex = this.textures.createCanvas('board', bw, bh);
+    const ctx = this.boardTex.context;
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) this.paintCell(ctx, r, c);
+    }
+    this.boardTex.refresh();
+    this.boardImg = this.add.image(BOARD_MARGIN, TOP_MARGIN, 'board').setOrigin(0, 0).setDepth(-0.5);
+  }
+
+  cellShade(r, c) {
+    return ((r * 73856093) ^ (c * 19349663)) >>> 0 & 3;
+  }
+
+  paintCell(ctx, r, c) {
+    const v = grid[r][c];
+    const x = c * CELL, y = r * CELL;
+    if (v === -1) {
+      ctx.fillStyle = EMPTY_BOARD;
+      ctx.fillRect(x, y, CELL, CELL);
+      ctx.strokeStyle = 'rgba(255,255,255,0.035)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
+    } else {
+      ctx.fillStyle = CELL_SHADES[v][this.cellShade(r, c)];
+      ctx.fillRect(x, y, CELL, CELL);
+      ctx.strokeStyle = 'rgba(0,0,0,0.055)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
+    }
+  }
+
+  paintBlankCell(r, c) {
+    if (!this.boardTex) return;
+    const ctx = this.boardTex.context;
+    const x = c * CELL, y = r * CELL;
+    ctx.fillStyle = EMPTY_BOARD;
+    ctx.fillRect(x, y, CELL, CELL);
+    ctx.strokeStyle = 'rgba(255,255,255,0.035)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
+  }
+
+  // ============ 动物层 ============
+  renderAnimals() {
+    const g = this.animalGfx;
+    g.clear();
+    if (this.animalPool) {
+      const AS = Math.max(6, Math.round(CELL * 0.9));
+      let n = 0;
+      for (const a of movingAnimals) {
+        if (a.path.length === 0) continue;
+        const img = this.animalPool[n];
+        if (!img) break;
+        img.setVisible(true)
+          .setTexture('animalMedal_' + a.color)
+          .setPosition(a.x, a.y)
+          .setDisplaySize(AS, AS);
+        n++;
+      }
+      for (let i = n; i < this.animalPool.length; i++) {
+        if (this.animalPool[i].visible) this.animalPool[i].setVisible(false);
+      }
+      return;
+    }
+    // 动物素材尚未就绪时的兜底：彩色方块 + 爪印
+    const AS = Math.max(4, Math.round(CELL * 0.75));
+    for (const a of movingAnimals) {
+      if (a.path.length === 0) continue;
+      const px = a.x - AS / 2;
+      const py = a.y - AS / 2;
+      g.fillStyle(0x000000, 0.25);
+      g.fillRoundedRect(px + 1.5, py + 2, AS, AS, 3);
+      g.fillStyle(DARK_COLORS[a.color], 1);
+      g.fillRoundedRect(px - 1, py - 1, AS + 2, AS + 2, 4);
+      g.fillStyle(COLORS[a.color], 1);
+      g.fillRoundedRect(px, py, AS, AS, 3);
+      g.fillStyle(0xFFFFFF, 0.12);
+      g.fillRoundedRect(px + AS * 0.12, py + AS * 0.10, AS * 0.76, AS * 0.28, 2);
+      if (AS >= 14) {
+        g.fillStyle(0xFFFFFF, 0.26);
+        g.fillCircle(a.x, a.y + AS * 0.12, AS * 0.13);
+        g.fillCircle(a.x - AS * 0.18, a.y - AS * 0.12, AS * 0.06);
+        g.fillCircle(a.x, a.y - AS * 0.17, AS * 0.06);
+        g.fillCircle(a.x + AS * 0.18, a.y - AS * 0.12, AS * 0.06);
+      } else {
+        g.fillStyle(0xFFFFFF, 0.25);
+        g.fillCircle(a.x, a.y, Math.max(1, AS * 0.12));
+      }
+    }
+  }
+
+  // ============ 食盆 / 队列 / 飞行的食物 ============
+  drawToken(g, x, y, size, color, radius, alpha) {
+    g.fillStyle(0x000000, 0.25 * alpha);
+    g.fillRoundedRect(x + 2, y + 3, size, size, radius);
+    g.fillStyle(DARK_COLORS[color], alpha);
+    g.fillRoundedRect(x - 1.5, y - 1.5, size + 3, size + 3, radius + 2);
+    g.fillStyle(COLORS[color], alpha);
+    g.fillRoundedRect(x, y, size, size, radius);
+    g.fillStyle(0xFFFFFF, 0.12 * alpha);
+    g.fillRoundedRect(x + size * 0.12, y + size * 0.10, size * 0.76, size * 0.32, radius * 0.8);
+    g.lineStyle(1, C.plateRing, 0.55 * alpha);
+    g.strokeRoundedRect(x + 0.5, y + 0.5, size - 1, size - 1, radius);
+  }
+
+  drawUI() {
+    const g = this.uiGfx;
+    g.clear();
+    const FOOD_SIZE = Math.round(56 * UI_SCALE);
+    const PLATE_R = plateRadius();
+    const Q_SPACING = (CANVAS_W - 2 * BOARD_MARGIN) / 4;
+    const Q_START_Y = UI_Y + 6 + 2 * PLATE_R + Math.round(12 * UI_SCALE);
+
+    // 食盆
+    for (let i = 0; i < 6; i++) {
+      const cx = BOARD_MARGIN + PLATE_COLS[i] * CELL;
+      const cy = UI_Y + 6 + PLATE_R;
+      const pulse = this.platePulse[i] || 0;
+      const pr = PLATE_R * (1 + 0.08 * Math.sin(Math.PI * pulse));
+      const food = this.plates[i];
+      if (food && !food.flying) {
+        this.foodLabels[i].setVisible(true);
+        g.fillStyle(0x000000, 0.28);
+        g.fillCircle(cx + 2, cy + 3, pr + 3);
+        g.fillStyle(DARK_COLORS[food.color], 1);
+        g.fillCircle(cx, cy, pr + 3);
+        g.fillStyle(COLORS[food.color], 1);
+        g.fillCircle(cx, cy, pr);
+        g.fillStyle(0xFFFFFF, 0.12);
+        g.fillCircle(cx - pr * 0.28, cy - pr * 0.32, pr * 0.55);
+        g.lineStyle(2, C.plateRing, 0.6);
+        g.strokeCircle(cx, cy, pr + 3);
+        g.lineStyle(1, 0xFFFFFF, 0.14);
+        g.strokeCircle(cx, cy, pr - 1);
+        this.foodLabels[i]
+          .setPosition(cx, cy + pr * 0.44)
+          .setText(String(food.remaining))
+          .setColor(COLOR_INK[food.color]);
+      } else {
+        this.foodLabels[i].setVisible(false);
+        g.fillStyle(C.surface, 0.55);
+        g.fillCircle(cx, cy, pr + 3);
+        g.lineStyle(1.5, C.textDim, 0.28);
+        g.strokeCircle(cx, cy, pr + 3);
+        g.lineStyle(1, 0xFFFFFF, 0.06);
+        g.strokeCircle(cx, cy, pr);
+      }
+      if (this.plateIcons) {
+        const icon = this.plateIcons[i];
+        if (food && !food.flying) {
+          icon.setVisible(true)
+            .setTexture('animalSil_' + food.color)
+            .setPosition(cx, cy - pr * 0.32)
+            .setDisplaySize(pr * 0.8, pr * 0.8)
+            .setAlpha(0.32);
+        } else {
+          icon.setVisible(false);
+        }
+      }
+    }
+
+    // 飞行中的食物
+    for (const food of flyingFoods) {
+      const s = FOOD_SIZE * 0.92;
+      this.drawToken(g, food.fx - s / 2, food.fy - s / 2, s, food.color, 8 * UI_SCALE, 0.95);
+    }
+
+    // 队列：4 列 × 2 行，底下带隐藏数量
+    for (let qi = 0; qi < 4; qi++) {
+      const qx = BOARD_MARGIN + qi * Q_SPACING + Q_SPACING / 2 - FOOD_SIZE / 2;
+      const queue = this.queues[qi];
+      for (let fi = 0; fi < 2; fi++) {
+        const fy = Q_START_Y + fi * (FOOD_SIZE + 4 * UI_SCALE);
+        const label = this.queueLabels[qi][fi];
+        const qIcon = this.queueIcons && this.queueIcons[qi] && this.queueIcons[qi][fi];
+        if (fi < queue.length) {
+          const food = queue[fi];
+          this.drawToken(g, qx, fy, FOOD_SIZE, food.color, 10 * UI_SCALE, 1);
+          label.setVisible(true)
+            .setPosition(qx + FOOD_SIZE / 2, fy + FOOD_SIZE * 0.72)
+            .setText(String(food.capacity))
+            .setColor(COLOR_INK[food.color]);
+          if (qIcon) {
+            qIcon.setVisible(true)
+              .setTexture('animalSil_' + food.color)
+              .setPosition(qx + FOOD_SIZE * 0.26, fy + FOOD_SIZE * 0.26)
+              .setDisplaySize(FOOD_SIZE * 0.32, FOOD_SIZE * 0.32)
+              .setAlpha(0.35);
+          }
+        } else {
+          g.fillStyle(0xFFFFFF, 0.035);
+          g.fillRoundedRect(qx, fy, FOOD_SIZE, FOOD_SIZE, 10 * UI_SCALE);
+          g.lineStyle(1, C.line, 0.25);
+          g.strokeRoundedRect(qx + 0.5, fy + 0.5, FOOD_SIZE - 1, FOOD_SIZE - 1, 10 * UI_SCALE);
+          label.setVisible(false);
+          if (qIcon) qIcon.setVisible(false);
+        }
+      }
+      const hidden = queue.length - 2;
+      const badge = this.hiddenLabels[qi];
+      if (hidden > 0) {
+        badge.setVisible(true)
+          .setPosition(BOARD_MARGIN + qi * Q_SPACING + Q_SPACING / 2,
+            Q_START_Y + 2 * (FOOD_SIZE + 4 * UI_SCALE) + 2 * UI_SCALE)
+          .setText('还有 ' + hidden);
+      } else {
+        badge.setVisible(false);
+      }
+    }
+  }
+
+  // ============ 主循环 ============
   update(time, delta) {
-    // 使用 Phaser 原生帧循环，delta 为距上一帧的毫秒数
     this.onUpdate(delta);
   }
 
   onUpdate(delta) {
-    // 归一化到 16.67ms（约 60fps）基准，使移动速度与帧率无关
     const dt = (delta || 16.67) / 16.67;
-    window.__UPDATE_COUNT = (window.__UPDATE_COUNT || 0) + 1;
     if (!gameRunning || !this.gameInited) return;
 
-    // 更新移动动物
+    if (this.remainShown !== remainingAnimals) {
+      this.remainShown = remainingAnimals;
+      this.updateTopBar();
+    }
+    for (let i = 0; i < this.platePulse.length; i++) {
+      if (this.platePulse[i] > 0) {
+        this.platePulse[i] = REDUCED ? 0 : Math.max(0, this.platePulse[i] - dt / 0.3);
+      }
+    }
+
+    // 移动中的动物
     let needsBFS = false;
     for (let i = movingAnimals.length - 1; i >= 0; i--) {
       const a = movingAnimals[i];
       if (a.done) {
-        // 吃饱后立即消失，无飞离动画
         movingAnimals.splice(i, 1);
         needsBFS = true;
       } else if (a.path.length > 0) {
-        // 连续坐标移动：朝下一个路径点直线前进，速度为像素/帧
         const next = a.path[0];
         const tx = BOARD_MARGIN + next.col * CELL + CELL / 2;
         const ty = TOP_MARGIN + next.row * CELL + CELL / 2;
@@ -605,7 +1470,8 @@ class GameScene extends Phaser.Scene {
         }
       }
     }
-    // 飞行中的食物：从队列槽位直线飞到盘子
+
+    // 飞向食盆的食物
     for (let i = flyingFoods.length - 1; i >= 0; i--) {
       const food = flyingFoods[i];
       food.t += 0.08 * dt;
@@ -614,183 +1480,39 @@ class GameScene extends Phaser.Scene {
         food.flying = false;
         food.active = true;
         flyingFoods.splice(i, 1);
+        this.platePulse[food.plateIndex] = REDUCED ? 0 : 1;
         triggerBFS();
       } else {
         const cx = BOARD_MARGIN + PLATE_COLS[food.plateIndex] * CELL;
         const cy = UI_Y + 6 + plateRadius();
-        food.fx = food.fromX + (cx - food.fromX) * food.t;
-        food.fy = food.fromY + (cy - food.fromY) * food.t;
+        const e = food.t * food.t * (3 - 2 * food.t);
+        food.fx = food.fromX + (cx - food.fromX) * e;
+        food.fy = food.fromY + (cy - food.fromY) * e - Math.sin(Math.PI * food.t) * 24 * UI_SCALE;
       }
     }
+
     if (needsBFS) triggerBFS();
-    // 只重绘本帧离场的格子（脏格），棋盘其余部分复用离屏纹理
+
     if (dirtyCells.length > 0) {
       for (const d of dirtyCells) this.paintBlankCell(d.row, d.col);
-      this.boardTex.refresh();   // 批量重绘后一次性刷新纹理
+      this.boardTex.refresh();
       dirtyCells.length = 0;
     }
+
     this.renderAnimals();
     this.drawUI();
-    // 检查是否所有盘子满了且无动物可吸引
     this.checkFullPlates();
     this.checkGameOver();
   }
 
-  // ============ 绘制 ============
-  // 将静态棋盘一次性烘焙到离屏 Canvas 纹理（boardTex），由 boardImg 展示。
-  // 动物离场时只重绘对应单格，避免每帧 clear + 全量 fillRect。
-  drawGrid() {
-    if (this.boardImg) { this.boardImg.destroy(); this.boardImg = null; }
-    if (this.boardTex) { this.boardTex.destroy(); this.boardTex = null; }
-
-    const bw = COLS * CELL, bh = ROWS * CELL;
-    this.boardTex = this.textures.createCanvas('board', bw, bh);
-    const ctx = this.boardTex.context;
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        this.paintCell(ctx, r, c);
-      }
-    }
-    this.boardTex.refresh();
-    this.boardImg = this.add.image(BOARD_MARGIN, TOP_MARGIN, 'board').setOrigin(0, 0).setDepth(-0.5);
-  }
-
-  // 在指定 2d 上下文上绘制单格（纹理坐标，无棋盘边距）
-  paintCell(ctx, r, c) {
-    const v = grid[r][c];
-    const x = c * CELL, y = r * CELL;
-    if (v === -1) {
-      ctx.fillStyle = '#e8e8e8';
-      ctx.fillRect(x, y, CELL, CELL);
-    } else {
-      ctx.fillStyle = '#' + COLORS[v].toString(16).padStart(6, '0');
-      ctx.fillRect(x, y, CELL, CELL);
-      // 极淡格线，辅助辨认格子边界但不破坏图案
-      ctx.strokeStyle = 'rgba(0,0,0,0.06)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
-    }
-  }
-
-  // 动物离场后把单格重绘为空白（仅写入离屏上下文，不单独刷新纹理）
-  paintBlankCell(r, c) {
-    if (!this.boardTex) return;
-    const ctx = this.boardTex.context;
-    ctx.fillStyle = '#e8e8e8';
-    ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
-  }
-
-  // 生成木纹纹理（只生成一次）
-  makeWoodTexture() {
-    const key = 'wood';
-    if (this.textures.exists(key)) return key;
-    const size = 128;
-    const tex = this.textures.createCanvas(key, size, size);
-    const ctx = tex.context;
-    ctx.fillStyle = '#a9743f';
-    ctx.fillRect(0, 0, size, size);
-    for (let i = 0; i < 14; i++) {
-      const baseX = i * 9;
-      ctx.strokeStyle = i % 2 ? '#8b5a2b' : '#6b3e1f';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let y = 0; y <= size; y += 4) {
-        const x = baseX + Math.sin(y * 0.05 + i) * 3;
-        if (y === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-    tex.refresh();
-    return key;
-  }
-
-  // 布局木纹边框（棋盘尺寸变化后调用）
-  layoutWoodBorder() {
-    if (!this.borderTiles) return;
-    const T = Math.round(12 * UI_SCALE);
-    const bw = COLS * CELL;
-    const bh = ROWS * CELL;
-    const x = BOARD_MARGIN - T;
-    const y = TOP_MARGIN - T;
-    this.borderTiles[0].setPosition(x, y).setSize(bw + 2 * T, T);          // 上
-    this.borderTiles[1].setPosition(x, y + T + bh).setSize(bw + 2 * T, T); // 下
-    this.borderTiles[2].setPosition(x, y + T).setSize(T, bh);              // 左
-    this.borderTiles[3].setPosition(x + T + bw, y + T).setSize(T, bh);     // 右
-  }
-
-  renderAnimals() {
-    const g = this.animalGfx;
-    g.clear();
-    const AS = Math.max(4, Math.round(CELL * 0.75));
-    for (const a of movingAnimals) {
-      if (a.path.length > 0) {
-        const px = a.x - AS / 2;
-        const py = a.y - AS / 2;
-        g.fillStyle(COLORS[a.color]);
-        g.fillRect(px, py, AS, AS);
-      }
-    }
-  }
-
-  drawUI() {
-    const g = this.uiGfx;
-    g.clear();
-    const FOOD_SIZE = Math.round(56 * UI_SCALE);
-    const PLATE_R = plateRadius();
-    const Q_SPACING = (CANVAS_W - 2 * BOARD_MARGIN) / 4;
-    const Q_START_Y = UI_Y + 6 + 2 * PLATE_R + Math.round(12 * UI_SCALE);
-
-    // 盘子（圆形，带盘沿）
-    for (let i = 0; i < 6; i++) {
-      const cx = BOARD_MARGIN + PLATE_COLS[i] * CELL;
-      const cy = UI_Y + 6 + PLATE_R;
-      const food = this.plates[i];
-      if (food && !food.flying) {
-        this.foodLabels[i].setVisible(true);
-        g.fillStyle(COLORS[food.color]);
-        g.fillCircle(cx, cy, PLATE_R);
-        // 盘沿描边
-        g.lineStyle(Math.max(2, Math.round(2 * UI_SCALE)), 0x2c3e50, 1);
-        g.strokeCircle(cx, cy, PLATE_R);
-        this.foodLabels[i].setPosition(cx, cy);
-        this.foodLabels[i].setText(String(food.remaining));
-      } else {
-        this.foodLabels[i].setVisible(false);
-        g.lineStyle(1, 0x999999);
-        g.strokeCircle(cx, cy, PLATE_R);
-      }
-    }
-
-    // 飞行中的食物（从队列槽位飞向盘子）
-    for (const food of flyingFoods) {
-      g.fillStyle(COLORS[food.color]);
-      g.fillRoundedRect(food.fx - FOOD_SIZE / 2, food.fy - FOOD_SIZE / 2, FOOD_SIZE, FOOD_SIZE, 4);
-    }
-
-    // 队列
-    for (let qi = 0; qi < 4; qi++) {
-      const qx = BOARD_MARGIN + qi * Q_SPACING + Q_SPACING / 2 - FOOD_SIZE / 2;
-      const queue = this.queues[qi];
-      for (let fi = 0; fi < 2; fi++) {
-        const fy = Q_START_Y + fi * (FOOD_SIZE + 4);
-        const label = this.queueLabels[qi][fi];
-        if (fi < queue.length) {
-          const food = queue[fi];
-          g.fillStyle(COLORS[food.color]);
-          g.fillRoundedRect(qx, fy, FOOD_SIZE, FOOD_SIZE, 4);
-          label.setVisible(true).setPosition(qx + FOOD_SIZE / 2, fy + FOOD_SIZE / 2);
-          label.setText(String(food.capacity));
-        } else {
-          label.setVisible(false);
-        }
-      }
-    }
-  }
-
   // ============ 交互 ============
+  canAct() {
+    return gameRunning && !this.dialogShown && !this.settingsBox.visible &&
+      !(this.startBox && this.startBox.active);
+  }
+
   onPointerDown(pointer) {
-    // 遮罩层（清盘对话框 / 设置面板）打开时，屏蔽棋盘交互
-    if (this.dialogShown || this.settingsOverlay.visible) return;
+    if (!this.canAct()) return;
     const x = pointer.x;
     const y = pointer.y;
     const FOOD_SIZE = Math.round(56 * UI_SCALE);
@@ -798,7 +1520,7 @@ class GameScene extends Phaser.Scene {
     const PLATE_R = plateRadius();
     const Q_START_Y = UI_Y + 6 + 2 * PLATE_R + Math.round(12 * UI_SCALE);
 
-    if (y >= Q_START_Y && y < Q_START_Y + 2 * (FOOD_SIZE + 4)) {
+    if (y >= Q_START_Y && y < Q_START_Y + 2 * (FOOD_SIZE + 4 * UI_SCALE)) {
       for (let qi = 0; qi < 4; qi++) {
         const qx = BOARD_MARGIN + qi * Q_SPACING + Q_SPACING / 2 - FOOD_SIZE / 2;
         if (x >= qx && x < qx + FOOD_SIZE) {
@@ -817,7 +1539,7 @@ class GameScene extends Phaser.Scene {
     food.plateIndex = emptyIdx;
     food.plateCol = PLATE_COLS[emptyIdx];
     food.seq = foodSeq++;
-    food.active = false;      // 飞到盘子后再激活
+    food.active = false;
     food.flying = true;
     const FOOD_SIZE = Math.round(56 * UI_SCALE);
     const Q_SPACING = (CANVAS_W - 2 * BOARD_MARGIN) / 4;
@@ -827,11 +1549,10 @@ class GameScene extends Phaser.Scene {
     food.fx = food.fromX;
     food.fy = food.fromY;
     food.t = 0;
-    this.plates[emptyIdx] = food;   // 预占空盘，避免被其他队列选中
+    this.plates[emptyIdx] = food;
     flyingFoods.push(food);
   }
 
-  // 选择离队列水平位置最近的空盘（替代从左到右的第一个空盘）
   nearestEmptyPlate(qi) {
     const Q_SPACING = (CANVAS_W - 2 * BOARD_MARGIN) / 4;
     const qx = BOARD_MARGIN + qi * Q_SPACING + Q_SPACING / 2;
@@ -846,8 +1567,7 @@ class GameScene extends Phaser.Scene {
   }
 
   onReshuffle() {
-    // 遮罩层打开时重排无效
-    if (this.dialogShown || this.settingsOverlay.visible) return;
+    if (!this.canAct()) return;
     const allFoods = [];
     for (const q of this.queues) allFoods.push(...q.splice(0));
     shuffle(allFoods);
@@ -857,11 +1577,18 @@ class GameScene extends Phaser.Scene {
     this.queues.push(...newQueues);
   }
 
+  onSpeed() {
+    if (!this.canAct()) return;
+    speedMultiplier = speedMultiplier === 1 ? 2 : 1;
+    if (this.btnSpeed && this.btnSpeed.speedRedraw) this.btnSpeed.speedRedraw();
+  }
+
   arriveAtFood(animal) {
     const food = animal.targetFood;
     if (food && food.active) {
       food.remaining--;
       food.attracted--;
+      this.platePulse[food.plateIndex] = REDUCED ? 0 : 1;
       if (food.remaining <= 0) {
         food.active = false;
         this.plates[food.plateIndex] = null;
@@ -872,71 +1599,26 @@ class GameScene extends Phaser.Scene {
 
   checkFullPlates() {
     if (this.dialogShown) return;
-    // 6 个盘子都满，且无动物在移动，且无动物可吸引
+    if (flyingFoods.length > 0) return;
     const allFull = this.plates.every(p => p !== null);
     if (!allFull || movingAnimals.length > 0) return;
     const canAttract = this.plates.some(p => plateBFS[p.plateIndex].hasAnimals(p.color));
     if (canAttract) return;
-    // 弹出清盘提示
     this.showDialog();
   }
 
-  showDialog() {
-    this.dialogShown = true;
-    this.dialogOverlay.setVisible(true);
-    this.drawDialogPanel();
-    this.dialogPanel.setVisible(true);
-    this.dialogText.setText('6 个盘子已满，是否清空前三个盘子\n并将食物放回队列？').setVisible(true);
-    this.dialogConfirm.setVisible(true);
-  }
-
-  // 绘制白色圆角面板（投影 + 主体 + 粗描边），居中，宽 w 高 h
-  drawPanel(g, w, h) {
-    g.clear();
-    const x = CANVAS_W / 2 - w / 2;
-    const y = CANVAS_H / 2 - h / 2;
-    // 投影
-    g.fillStyle(0x000000, 0.22);
-    g.fillRoundedRect(x + 4, y + 5, w, h, 16);
-    // 面板主体
-    g.fillStyle(0xffffff, 1);
-    g.fillRoundedRect(x, y, w, h, 16);
-    // 粗描边
-    g.lineStyle(Math.max(3, Math.round(3 * UI_SCALE)), 0x2c3e50, 1);
-    g.strokeRoundedRect(x, y, w, h, 16);
-  }
-
-  drawDialogPanel() {
-    this.drawPanel(this.dialogPanel, Math.round(360 * UI_SCALE), Math.round(150 * UI_SCALE));
-  }
-
-  drawVictoryPanel() {
-    this.drawPanel(this.victoryPanel, Math.round(360 * UI_SCALE), Math.round(150 * UI_SCALE));
-  }
-
-  hideDialog() {
-    this.dialogShown = false;
-    this.dialogOverlay.setVisible(false);
-    this.dialogPanel.setVisible(false);
-    this.dialogText.setVisible(false);
-    this.dialogConfirm.setVisible(false);
-  }
-
   onClearPlates() {
-    // 清空前三个盘子，食物放回队列
     for (let i = 0; i < 3; i++) {
       const food = this.plates[i];
       if (food) {
         food.active = false;
         food.plateIndex = -1;
         food.attracted = 0;
-        // 放回队列末尾
         this.queues[i % 4].push(food);
         this.plates[i] = null;
       }
     }
     this.hideDialog();
-    // 新食物上盘后重新触发 BFS
     triggerBFS();
   }
 
@@ -946,54 +1628,67 @@ class GameScene extends Phaser.Scene {
     const hasAnimals = remainingAnimals > 0;
 
     if (allQueuesEmpty && allPlatesEmpty && !hasAnimals && movingAnimals.length === 0) {
-      if (URL_LEVEL) unlockLevel(GAME_ID, URL_LEVEL + 1);   // 通关解锁下一关
-      this.msgText.setText('胜利! 所有动物都吃饱了!').setVisible(true);
-      this.victoryOverlay.setVisible(true);
-      this.drawVictoryPanel();
-      this.victoryPanel.setVisible(true);
+      if (URL_LEVEL) unlockLevel(GAME_ID, URL_LEVEL + 1);
+      const title = URL_LEVEL ? '第 ' + URL_LEVEL + ' 关完成' : '所有动物都吃饱了';
+      const body = URL_LEVEL
+        ? '已解锁第 ' + (URL_LEVEL + 1) + ' 关，继续下一桌。'
+        : '这一桌已经收拾干净，再来一局？';
+      this.showVictory(title, body, !!URL_LEVEL);
       this.btnReshuffle.setVisible(false);
-      this.btnNext.setVisible(!!URL_LEVEL);      // 关卡模式：进入下一关
-      this.btnRestart.setVisible(!URL_LEVEL);    // 自由模式：再来一局
       gameRunning = false;
     } else if (allQueuesEmpty && allPlatesEmpty && hasAnimals && movingAnimals.length === 0) {
-      this.msgText.setText('游戏结束! 还有动物没被消除。').setVisible(true);
-      this.victoryOverlay.setVisible(true);
-      this.drawVictoryPanel();
-      this.victoryPanel.setVisible(true);
+      const body = '还有 ' + remainingAnimals + ' 只动物没被消除，再试一次吧。';
+      this.showVictory('游戏结束', body, false);
       this.btnReshuffle.setVisible(false);
-      this.btnNext.setVisible(false);            // 失败只能重试本关
-      this.btnRestart.setVisible(true);
       gameRunning = false;
     }
   }
 
-  // 通关后进入下一关：整页跳转，让 URL_LEVEL、随机种子和关卡标签都按新关卡重建
   onNextLevel() {
     location.href = 'animal-elimination.html?level=' + (URL_LEVEL + 1);
   }
 
+  // ============ 开局与布局 ============
+  prepareBoard(img) {
+    this.currentImg = img;
+    processImage(img);
+    this.scale.resize(CANVAS_W, CANVAS_H);
+    this.initGame();
+    this.layoutUI();
+    this.drawGrid();
+    this.drawUI();
+  }
+
+  setDefaultBoard() {
+    COLS = 30;
+    ROWS = 30;
+    CELL = Math.max(4, Math.round(TARGET_W / COLS));
+    CANVAS_W = COLS * CELL + 2 * BOARD_MARGIN;
+    CANVAS_H = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL + Math.round(BOTTOM_H * UI_SCALE);
+    UI_Y = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL;
+    PLATE_COLS = [];
+    for (let i = 0; i < 6; i++) PLATE_COLS[i] = Math.round(COLS * (i + 0.5) / 6);
+    this.scale.resize(CANVAS_W, CANVAS_H);
+  }
+
+  prepareDefaultBoard() {
+    this.setDefaultBoard();
+    generateGrid();
+    this.initGame();
+    this.layoutUI();
+    this.drawGrid();
+    this.drawUI();
+  }
+
   resetGame() {
-    // 隐藏结算态 UI，恢复游戏按钮
-    this.btnNext.setVisible(false);
-    this.msgText.setVisible(false);
-    this.victoryOverlay.setVisible(false);
-    this.victoryPanel.setVisible(false);
-    this.btnRestart.setVisible(false);
+    this.hideVictory();
     this.btnReshuffle.setVisible(true);
+    gameRunning = false;
     loadKenneyImage(img => {
-      this.currentImg = img;
-      processImage(img);
-      this.scale.resize(CANVAS_W, CANVAS_H);
-      this.layoutUI();
-      this.initGame();
-      this.drawGrid();
-      this.drawUI();
+      this.prepareBoard(img);
       gameRunning = true;
     }, () => {
-      generateGrid();
-      this.initGame();
-      this.drawGrid();
-      this.drawUI();
+      this.prepareDefaultBoard();
       gameRunning = true;
     });
   }
@@ -1001,35 +1696,24 @@ class GameScene extends Phaser.Scene {
   loadRandomImage() {
     this.loadingText.setVisible(true);
     this.btnStart.setVisible(false);
-    loadKenneyImage(img => {
-      this.currentImg = img;
-      processImage(img);
-      this.scale.resize(CANVAS_W, CANVAS_H);
-      this.layoutUI();
-      this.initGame();
-      this.drawGrid();
-      this.drawUI();
-      this.loadingText.setVisible(false);
-      this.btnStart.setVisible(true);
-      if (URL_LEVEL) this.startNow();     // 从关卡页进来，直接开跑
-    }, () => {
-      this.loadingText.setText('图片加载失败，使用默认棋盘');
-      this.initGame();
-      this.drawGrid();
-      this.drawUI();
-      this.loadingText.setVisible(false);
-      this.btnStart.setVisible(true);
-      if (URL_LEVEL) this.startNow();
+    // 先把 16 组颜色对应的动物加载进来，生成圆章与剪影，再生成拼贴棋盘
+    const medals = Promise.all(COLOR_ANIMALS.map(loadAnimal))
+      .then(() => this.buildAnimalMedallions())
+      .catch(() => this.buildAnimalMedallions());
+    medals.then(() => {
+      loadKenneyImage(img => {
+        this.prepareBoard(img);
+        this.loadingText.setVisible(false);
+        this.btnStart.setVisible(true);
+        if (URL_LEVEL) this.startNow();
+      }, () => {
+        this.prepareDefaultBoard();
+        this.loadingText.setText('图片加载失败，使用默认棋盘');
+        this.loadingText.setVisible(true);
+        this.btnStart.setVisible(true);
+        if (URL_LEVEL) this.startNow();
+      });
     });
-  }
-
-  // 收掉开始遮罩并开跑（点按钮和 URL 自动进入共用）
-  startNow() {
-    if (!this.startOverlay.active) return;
-    this.startOverlay.destroy();
-    this.loadingText.destroy();
-    this.btnStart.destroy();
-    gameRunning = true;
   }
 
   initGame() {
@@ -1049,52 +1733,42 @@ class GameScene extends Phaser.Scene {
     for (let i = 0; i < 6; i++) {
       plateBFS[i] = new BFS(grid, ROWS, COLS, BLANK_ROWS, COLORS.length, PLATE_COLS[i]);
     }
+    this.platePulse = [0, 0, 0, 0, 0, 0];
+    this.remainShown = -1;
   }
 
-  // 画布尺寸可能已变，重排所有按钮/遮罩/面板位置
   layoutUI() {
-    this.btnReshuffle.setPosition(CANVAS_W / 2, CANVAS_H - Math.round(30 * UI_SCALE));
-    this.btnRestart.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(42 * UI_SCALE));
-    this.btnNext.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(42 * UI_SCALE));
-    this.btnStart.setPosition(CANVAS_W / 2, CANVAS_H / 2);
-    this.loadingText.setPosition(CANVAS_W / 2, CANVAS_H / 2 - 60);
-    this.msgText.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(32 * UI_SCALE));
-    if (this.startOverlay && this.startOverlay.active) {
-      this.startOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
-      this.startOverlay.setSize(CANVAS_W, CANVAS_H);
+    this.drawBackground();
+    this.drawToolbar();
+    this.layoutWoodBorder();
+    this.drawFrameAccent();
+    this.updateTopBar();
+
+    if (this.startBox) {
+      this.startBox.setPosition(CANVAS_W / 2, CANVAS_H / 2);
+      this.startScrim.setSize(CANVAS_W, CANVAS_H);
+      this.layoutStartScreen();
     }
+
     this.dialogOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
     this.dialogOverlay.setSize(CANVAS_W, CANVAS_H);
-    this.dialogText.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(32 * UI_SCALE));
-    this.dialogConfirm.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(42 * UI_SCALE));
+    this.dialogBox.setPosition(CANVAS_W / 2, CANVAS_H / 2);
+
     this.victoryOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
     this.victoryOverlay.setSize(CANVAS_W, CANVAS_H);
-    this.btnSettings.setPosition(Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
-    this.btnRestartIcon.setPosition(Math.round(110 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
-    this.btnSpeed.setPosition(CANVAS_W - Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
+    this.victoryBox.setPosition(CANVAS_W / 2, CANVAS_H / 2);
+
     this.settingsOverlay.setPosition(CANVAS_W / 2, CANVAS_H / 2);
     this.settingsOverlay.setSize(CANVAS_W, CANVAS_H);
-    this.settingsTitle.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(145 * UI_SCALE));
-    this.sizeButtons.forEach((btn, i) => btn.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(100 * UI_SCALE) + i * Math.round(44 * UI_SCALE)));
-    this.btnSettingsClose.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(126 * UI_SCALE));
-    this.layoutWoodBorder();
-  }
+    this.settingsBox.setPosition(CANVAS_W / 2, CANVAS_H / 2);
 
-  openSettings() {
-    this.settingsOverlay.setVisible(true);
-    this.drawPanel(this.settingsPanel, Math.round(240 * UI_SCALE), Math.round(360 * UI_SCALE));
-    this.settingsPanel.setVisible(true);
-    this.settingsTitle.setVisible(true);
-    this.sizeButtons.forEach(b => b.setVisible(true));
-    this.btnSettingsClose.setVisible(true);
-  }
+    const cy = CANVAS_H - Math.round(32 * UI_SCALE);
+    this.btnSettings.setPosition(50 * UI_SCALE, cy);
+    this.btnRestartIcon.setPosition(108 * UI_SCALE, cy);
+    this.btnReshuffle.setPosition(CANVAS_W / 2, cy);
+    this.btnSpeed.setPosition(CANVAS_W - 60 * UI_SCALE, cy);
 
-  closeSettings() {
-    this.settingsOverlay.setVisible(false);
-    this.settingsPanel.setVisible(false);
-    this.settingsTitle.setVisible(false);
-    this.sizeButtons.forEach(b => b.setVisible(false));
-    this.btnSettingsClose.setVisible(false);
+    this.updateSizeButtons();
   }
 
   applyBoardSize(n) {
@@ -1102,18 +1776,13 @@ class GameScene extends Phaser.Scene {
     localStorage.setItem('boardSize', String(n));
     this.closeSettings();
     if (!this.currentImg) return;
-    processImage(this.currentImg);
-    this.scale.resize(CANVAS_W, CANVAS_H);
-    this.layoutUI();
-    this.initGame();
-    this.drawGrid();
-    this.drawUI();
+    this.prepareBoard(this.currentImg);
+    gameRunning = true;
   }
 }
 
 // ============ 图片处理 ============
 function processImage(img) {
-  // 计算棋盘尺寸：最长边不超过 BOARD_MAX_DIM，保持比例
   const maxDim = BOARD_MAX_DIM;
   let w = img.width, h = img.height;
   if (w > maxDim || h > maxDim) {
@@ -1123,16 +1792,13 @@ function processImage(img) {
   }
   COLS = Math.max(1, Math.min(w, maxDim));
   ROWS = Math.max(1, Math.min(h, maxDim));
-  // 格子大小随列数缩放，保持棋盘宽度约 TARGET_W 像素
   CELL = Math.max(4, Math.round(TARGET_W / COLS));
   CANVAS_W = COLS * CELL + 2 * BOARD_MARGIN;
-  CANVAS_H = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL + Math.round(290 * UI_SCALE);
+  CANVAS_H = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL + Math.round(BOTTOM_H * UI_SCALE);
   UI_Y = TOP_MARGIN + (ROWS + BLANK_ROWS) * CELL;
-  // 6 个盘子沿棋盘宽度均匀分布
   PLATE_COLS = [];
   for (let i = 0; i < 6; i++) PLATE_COLS[i] = Math.round(COLS * (i + 0.5) / 6);
 
-  // 将图片缩放到棋盘尺寸，提取像素
   const cvs = document.createElement('canvas');
   cvs.width = COLS;
   cvs.height = ROWS;
@@ -1140,19 +1806,17 @@ function processImage(img) {
   ctx.drawImage(img, 0, 0, COLS, ROWS);
   const data = ctx.getImageData(0, 0, COLS, ROWS).data;
 
-  // 收集所有像素颜色（仅用于布局映射，不改变调色板）
   const pixels = [];
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i], g = data[i+1], b = data[i+2];
+    const r = data[i], g = data[i + 1], b = data[i + 2];
     pixels.push((r << 16) | (g << 8) | b);
   }
 
-  // 将每个像素映射到最近的固定彩虹色（COLORS 保持默认，不随图片改变）
   function colorDist(r, g, b, key) {
     const dr = r - ((key >> 16) & 0xff);
     const dg = g - ((key >> 8) & 0xff);
     const db = b - (key & 0xff);
-    return dr*dr + dg*dg + db*db;
+    return dr * dr + dg * dg + db * db;
   }
   grid = Array(ROWS).fill(null).map(() => Array(COLS).fill(0));
   for (let r = 0; r < ROWS; r++) {
@@ -1160,18 +1824,19 @@ function processImage(img) {
       const key = pixels[r * COLS + c];
       let best = 0, bestDist = Infinity;
       for (let i = 0; i < COLORS.length; i++) {
-        const d = colorDist((key>>16)&0xff, (key>>8)&0xff, key&0xff, COLORS[i]);
+        const d = colorDist((key >> 16) & 0xff, (key >> 8) & 0xff, key & 0xff, COLORS[i]);
         if (d < bestDist) { bestDist = d; best = i; }
       }
       grid[r][c] = best;
     }
   }
 }
+
 const config = {
   type: Phaser.AUTO,
   width: CANVAS_W,
   height: CANVAS_H,
-  backgroundColor: '#e8e8e8',
+  backgroundColor: '#1A1512',
   scene: GameScene,
   parent: 'game',
 };
