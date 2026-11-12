@@ -567,6 +567,10 @@ class GameScene extends Phaser.Scene {
         sctx.beginPath(); sctx.arc(70, 36, 7, 0, Math.PI * 2); sctx.fill();
       }
 
+      // 棋盘格用的剪影画布：paintCell 以低透明度压印到色块上
+      this.cellSils = this.cellSils || [];
+      this.cellSils[i] = silCanvas;
+
       const silKey = 'animalSil_' + i;
       if (!this.textures.exists(silKey)) {
         const silTex = this.textures.createCanvas(silKey, SIL, SIL);
@@ -1241,6 +1245,17 @@ class GameScene extends Phaser.Scene {
     } else {
       ctx.fillStyle = CELL_SHADES[v][this.cellShade(r, c)];
       ctx.fillRect(x, y, CELL, CELL);
+      // 动物剪影压印：近看能认出这只动物，远看仍是完整的量化马赛克图案。
+      // 移动中的动物用实心圆章，静止的用压花，靠浓淡区分状态。
+      const sil = this.cellSils && this.cellSils[v];
+      if (sil && CELL >= 12) {
+        const s = CELL * 0.66;
+        const off = (CELL - s) / 2;
+        ctx.save();
+        ctx.globalAlpha = 0.42;
+        ctx.drawImage(sil, x + off, y + off, s, s);
+        ctx.restore();
+      }
       ctx.strokeStyle = 'rgba(0,0,0,0.055)';
       ctx.lineWidth = 1;
       ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);

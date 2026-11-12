@@ -332,6 +332,15 @@ class GameScene extends Phaser.Scene {
     this.flySample = 0;
     this.absorbBuf = [];
     this.platePop = new Array(MAX_PLATE_SLOTS).fill(0);
+    // 合并动画：被吃掉的那几颗盘子先滑向保留的那颗再消失
+    this.mergeFlights = [];
+    this.mergeLabels = [];
+    for (let i = 0; i < 8; i++) {
+      this.mergeLabels.push(this.add.text(0, 0, '', {
+        fontSize: Math.round(15 * UI_SCALE) + 'px', color: '#FFFFFF',
+        fontFamily: FONT_NUM, fontStyle: 'bold',
+      }).setOrigin(0.5).setDepth(3).setVisible(false));
+    }
 
     this.startRound(this.currentLevel);
   }
@@ -418,6 +427,7 @@ class GameScene extends Phaser.Scene {
     this.gameOver = false;
     this.flyers.length = 0;
     this.flySample = 0;
+    if (this.mergeFlights) this.mergeFlights.length = 0;
     if (this.platePop) this.platePop.fill(0);
     this.updateHud();
     this.renderSand();
@@ -595,7 +605,20 @@ class GameScene extends Phaser.Scene {
       uiChanged = true;
     }
 
-    // 5. 渲染
+    // 5. 合并残影：飞到目标时让保留的那颗盘子弹一下
+    if (this.mergeFlights.length > 0) {
+      for (let i = this.mergeFlights.length - 1; i >= 0; i--) {
+        const f = this.mergeFlights[i];
+        f.t += dt;
+        if (f.t < f.dur) continue;
+        this.mergeFlights.splice(i, 1);
+        const k = this.belt.slots.indexOf(f.target);
+        if (k >= 0) this.platePop[k] = REDUCED ? 0 : 1;
+      }
+      uiChanged = true;
+    }
+
+    // 6. 渲染
     if (sandChanged) {
       this.renderSand();
       this.updateHud();
@@ -709,6 +732,33 @@ class GameScene extends Phaser.Scene {
       nameLbl.setVisible(true).setPosition(cx, BELT_CY - 16).setText(SAND_LABELS[p.color]).setColor(ink).setAlpha(0.78);
     }
 
+    // ---------- 合并中的盘子 ----------
+    // 目标位置每帧重算：动画这 0.42 秒里传送带还会再走 80 多像素，
+    // 存一个定死的目标点会让残影落在盘子已经开走的地方。
+    for (let i = 0; i < this.mergeLabels.length; i++) this.mergeLabels[i].setVisible(false);
+    for (let i = 0; i < this.mergeFlights.length; i++) {
+      const f = this.mergeFlights[i];
+      const p = Math.min(1, f.t / f.dur);
+      const e = 1 - (1 - p) * (1 - p);
+      const slot = this.belt.slots.indexOf(f.target);
+      const toX = slot >= 0 ? this.belt.slotX(slot) : f.fromX;
+      const cx = f.fromX + (toX - f.fromX) * e;
+      const cy = BELT_CY - Math.sin(Math.PI * p) * 24;
+      const r = PLATE_R * (1 - 0.45 * e);
+      const a = 1 - e * e;
+
+      g.fillStyle(0x000000, 0.18 * a);
+      g.fillCircle(cx + 2, cy + 3, r);
+      g.fillStyle(SAND_PALETTE[f.color].hex, a);
+      g.fillCircle(cx, cy, r);
+      g.lineStyle(2, C.plateRing, 0.7 * a);
+      g.strokeCircle(cx, cy, r);
+
+      const lbl = this.mergeLabels[i];
+      lbl.setVisible(true).setPosition(cx, cy + r * 0.26)
+        .setText(String(f.label)).setColor(PAL_INK[f.color]).setAlpha(a);
+    }
+
     // ---------- 队列托盘 ----------
     const qg = this.queueGfx;
     qg.clear();
@@ -810,15 +860,32 @@ class GameScene extends Phaser.Scene {
   mergeTriples(color) {
     const idx = this.belt.colorSlots(color);
     if (idx.length < 3) return;
-    const keep = idx[0];
-    for (let k = 1; k < idx.length; k++) {
-      const p = this.belt.slots[idx[k]];
-      this.belt.slots[keep].remaining += p.remaining;
-      this.belt.slots[keep].capacity += p.capacity;
-      this.belt.slots[idx[k]] = null;
-      this.platePop[idx[k]] = 0;
+
+    // 保留屏幕内的那颗，玩家才看得到合并最终落在哪
+    let keep = idx[0];
+    for (const i of idx) {
+      if (this.belt.isVisible(i)) { keep = i; break; }
     }
-    this.platePop[keep] = REDUCED ? 0 : 1;
+    const target = this.belt.slots[keep];
+
+    for (const i of idx) {
+      if (i === keep) continue;
+      const p = this.belt.slots[i];
+      if (this.belt.isVisible(i)) this.spawnMergeFlight(this.belt.slotX(i), p, target);
+      target.remaining += p.remaining;
+      target.capacity += p.capacity;
+      this.belt.slots[i] = null;
+      this.platePop[i] = 0;
+    }
+  }
+
+  // 被合并的盘子从原槽位滑向保留的那颗，边飞边缩小淡出
+  spawnMergeFlight(fromX, plate, target) {
+    if (REDUCED || this.mergeFlights.length >= this.mergeLabels.length) return;
+    this.mergeFlights.push({
+      fromX, target, color: plate.color, label: plate.remaining,
+      t: 0, dur: 0.42,
+    });
   }
 
   onShuffle() {
