@@ -415,9 +415,9 @@ class MainScene extends Phaser.Scene {
         this.updateStats();
         if (this.found === 10) {
             if (URL_LEVEL) unlockLevel(GAME_ID, URL_LEVEL + 1);
-            this.showEnd("恭喜你找到了所有的快递！", 0x2ecc71);
+            this.showEnd("恭喜你找到了所有的快递！", 0x2ecc71, true);
         }
-        else if (this.errors >= 3) this.showEnd("任务失败：快递丢了！", 0xe74c3c);
+        else if (this.errors >= 3) this.showEnd("任务失败：快递丢了！", 0xe74c3c, false);
     }
 
     updateStats() {
@@ -425,15 +425,20 @@ class MainScene extends Phaser.Scene {
         for(let i=0; i<this.errors; i++) if(this.errorIcons[i]) this.errorIcons[i].setColor('#e74c3c');
     }
 
-    showEnd(msg, color) {
+    showEnd(msg, color, win) {
         this.isGameOver = true;
         const totalSize = 520;
         const centerX = 260;
         this.add.rectangle(centerX, centerX, 420, 180, 0x000000, 0.9).setDepth(100).setStrokeStyle(4, 0x5d4037);
         this.add.text(centerX, centerX - 30, msg, { fontSize: '28px', color: '#fff', fontWeight: 'bold' }).setOrigin(0.5).setDepth(101);
         const btn = this.add.rectangle(centerX, centerX + 45, 180, 50, color).setInteractive({useHandCursor:true}).setDepth(101);
-        this.add.text(centerX, centerX + 45, "下一局", { fontSize: '22px', color: '#fff' }).setOrigin(0.5).setDepth(102);
-        btn.on('pointerdown', () => this.scene.restart());
+        // 胜利时有关卡就进下一关，否则重开本局；失败一律重试本关
+        const label = win ? (URL_LEVEL ? '下一关' : '下一局') : '重试本关';
+        this.add.text(centerX, centerX + 45, label, { fontSize: '22px', color: '#fff' }).setOrigin(0.5).setDepth(102);
+        btn.on('pointerdown', () => {
+            if (win && URL_LEVEL) location.href = 'express-delivery.html?level=' + (URL_LEVEL + 1);
+            else this.scene.restart();
+        });
     }
 }
 

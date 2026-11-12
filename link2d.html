@@ -151,7 +151,12 @@ class GameScene extends Phaser.Scene {
       this.soundBtn.textContent = soundOn ? '声音：开' : '声音：关';
     };
     this.nextBtn = document.getElementById('next');
-    this.nextBtn.onclick = () => this.restartRound();
+    // 有关卡时按钮进入下一关；直接打开（自由模式）则重开一局
+    if (URL_LEVEL) this.nextBtn.textContent = '下一关';
+    this.nextBtn.onclick = () => {
+      if (URL_LEVEL) location.href = 'link2d.html?level=' + (URL_LEVEL + 1);
+      else this.restartRound();
+    };
   }
 
   buildBoard() {

@@ -306,6 +306,12 @@ class GameScene extends Phaser.Scene {
       .on('pointerdown', () => this.resetGame())
       .setVisible(false);
 
+    // 下一关按钮（关卡模式通关时替代「再来一局」，初始隐藏）
+    this.btnNext = this.makeCartoonButton(CANVAS_W / 2, CANVAS_H / 2 + Math.round(42 * UI_SCALE), '下一关', 0xe94560, 18)
+      .setDepth(4)
+      .on('pointerdown', () => this.onNextLevel())
+      .setVisible(false);
+
     // 2 倍速开关（底部右侧）
     this.btnSpeed = this.add.container(CANVAS_W - Math.round(50 * UI_SCALE), CANVAS_H - Math.round(30 * UI_SCALE));
     this.speedBg = this.add.graphics();
@@ -946,7 +952,8 @@ class GameScene extends Phaser.Scene {
       this.drawVictoryPanel();
       this.victoryPanel.setVisible(true);
       this.btnReshuffle.setVisible(false);
-      this.btnRestart.setVisible(true);
+      this.btnNext.setVisible(!!URL_LEVEL);      // 关卡模式：进入下一关
+      this.btnRestart.setVisible(!URL_LEVEL);    // 自由模式：再来一局
       gameRunning = false;
     } else if (allQueuesEmpty && allPlatesEmpty && hasAnimals && movingAnimals.length === 0) {
       this.msgText.setText('游戏结束! 还有动物没被消除。').setVisible(true);
@@ -954,13 +961,20 @@ class GameScene extends Phaser.Scene {
       this.drawVictoryPanel();
       this.victoryPanel.setVisible(true);
       this.btnReshuffle.setVisible(false);
+      this.btnNext.setVisible(false);            // 失败只能重试本关
       this.btnRestart.setVisible(true);
       gameRunning = false;
     }
   }
 
+  // 通关后进入下一关：整页跳转，让 URL_LEVEL、随机种子和关卡标签都按新关卡重建
+  onNextLevel() {
+    location.href = 'animal-elimination.html?level=' + (URL_LEVEL + 1);
+  }
+
   resetGame() {
     // 隐藏结算态 UI，恢复游戏按钮
+    this.btnNext.setVisible(false);
     this.msgText.setVisible(false);
     this.victoryOverlay.setVisible(false);
     this.victoryPanel.setVisible(false);
@@ -1041,6 +1055,7 @@ class GameScene extends Phaser.Scene {
   layoutUI() {
     this.btnReshuffle.setPosition(CANVAS_W / 2, CANVAS_H - Math.round(30 * UI_SCALE));
     this.btnRestart.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(42 * UI_SCALE));
+    this.btnNext.setPosition(CANVAS_W / 2, CANVAS_H / 2 + Math.round(42 * UI_SCALE));
     this.btnStart.setPosition(CANVAS_W / 2, CANVAS_H / 2);
     this.loadingText.setPosition(CANVAS_W / 2, CANVAS_H / 2 - 60);
     this.msgText.setPosition(CANVAS_W / 2, CANVAS_H / 2 - Math.round(32 * UI_SCALE));
