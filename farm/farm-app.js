@@ -137,6 +137,7 @@ function createApp({ rules, store, now, adProvider }) {
 
   async function upgradeWorker(mapId, routeId, workerId, stat) {
     if (!state) return { ok: false, reason: 'no_state' };
+    if (stat !== 'speed' && stat !== 'backpack') return { ok: false, reason: 'bad_stat' };
     const mapDef = rules.MAPS[mapId];
     const routeDef = mapDef && mapDef.routes[routeId];
     const routeState = state.maps[mapId] && state.maps[mapId].routes[routeId];

@@ -823,7 +823,15 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
 
     const tab = ev.target.closest('[data-tab]');
     if (tab) {
-      uiTab = tab.dataset.tab;
+      const key = tab.dataset.tab;
+      const lineId = Object.keys(LINES).find(function (id) {
+        return LINES[id].stages.some(function (stage) { return stage.key === key; });
+      });
+      if (lineId && lineId !== uiLine) {
+        uiLine = lineId;
+        renderLines();
+      }
+      uiTab = key;
       render();
       return;
     }

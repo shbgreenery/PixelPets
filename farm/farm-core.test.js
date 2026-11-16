@@ -7,6 +7,16 @@ const core = require('./farm-core.js');
 
 assert.strictEqual(core.validateContent(rules), true, '真实内容应通过校验');
 
+// 内容校验：产线引用了不存在的节点应被拦截
+const brokenLines = JSON.parse(JSON.stringify(rules));
+brokenLines.LINES.burger.stages[0].nodes[0] = 'missingNode';
+assert.throws(() => core.validateContent(brokenLines), /产线 burger 节点未知/);
+
+// 内容校验：跨产线的阶段键必须唯一，界面靠它反查产线
+const dupLines = JSON.parse(JSON.stringify(rules));
+dupLines.LINES.fish.stages[0].key = 'ranch';
+assert.throws(() => core.validateContent(dupLines), /产线阶段键重复/);
+
 // 初始：只有无限麦田，机器锁定，三个工段路线可用，背包 10
 const s = core.createState(rules, 0);
 assert.strictEqual(s.maps.farm.nodes.field.source, true);

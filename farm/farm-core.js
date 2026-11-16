@@ -34,7 +34,7 @@ function validateCost(cost) {
 }
 
 function validateContent(rules) {
-  const { ITEMS, PLAYER, MAPS, REWARDS, QUESTS } = rules;
+  const { ITEMS, PLAYER, MAPS, LINES, REWARDS, QUESTS } = rules;
 
   for (const [id, item] of Object.entries(ITEMS)) {
     if (!item || typeof item.name !== 'string' || !item.name) {
@@ -137,7 +137,7 @@ function validateContent(rules) {
       if (!sources.length) throw new Error(`路线 ${routeId} 来源类型不存在：${route.fromKind}`);
       if (!dests.length) throw new Error(`路线 ${routeId} 去向类型不存在：${route.toKind}`);
 
-      const fromSide = route.fromKind === 'field' ? 'out' : (route.fromSide || 'out');
+      const fromSide = route.fromSide || 'out';
       const toSide = route.toSide || 'in';
       if (fromSide !== 'out' || toSide !== 'in') throw new Error(`路线 ${routeId} 端口方向错误`);
 
@@ -186,6 +186,21 @@ function validateContent(rules) {
     }
   }
   const questTypes = ['machineCount', 'machineLevel', 'build', 'hire', 'hireLevel', 'consume', 'produce', 'sell', 'delivered', 'bag', 'coins'];
+  const stageKeys = new Set();
+  for (const [lineId, line] of Object.entries(LINES || {})) {
+    if (!line || typeof line.name !== 'string' || !line.name) throw new Error(`产线 ${lineId} 名称错误`);
+    if (!Array.isArray(line.stages) || line.stages.length === 0) throw new Error(`产线 ${lineId} 阶段为空`);
+    for (const stage of line.stages) {
+      if (!stage || typeof stage.key !== 'string' || !stage.key) throw new Error(`产线 ${lineId} 阶段键错误`);
+      if (stageKeys.has(stage.key)) throw new Error(`产线阶段键重复：${stage.key}`);
+      stageKeys.add(stage.key);
+      if (typeof stage.name !== 'string' || !stage.name) throw new Error(`产线 ${lineId} 阶段名称错误`);
+      if (!Array.isArray(stage.nodes) || stage.nodes.length === 0) throw new Error(`产线 ${lineId} 阶段 ${stage.key} 节点为空`);
+      for (const id of stage.nodes) {
+        if (!nodeIds.has(id)) throw new Error(`产线 ${lineId} 节点未知：${id}`);
+      }
+    }
+  }
   for (const quest of QUESTS || []) {
     if (!quest.id || !quest.title) throw new Error('任务定义错误');
     for (const cond of quest.conditions || []) {
