@@ -123,5 +123,30 @@ function memoryStore() {
   app2.tick();
   assert.strictEqual(app2.getState().lastTickAt, clock);
 
+  // wrapState 注入：createApp 必须在 start 时包装 state
+  {
+    let calls = 0;
+    const probe = createApp({
+      rules, store: memoryStore(), now: () => clock, adProvider: instantAdProvider,
+      wrapState: (s) => { calls += 1; return s; },
+    });
+    await probe.start();
+    assert.strictEqual(calls, 1, 'wrapState 在 start 时调用一次');
+  }
+
+  // 包装层能观察到对 state 的直接写入
+  {
+    const touched = [];
+    const probe = createApp({
+      rules, store: memoryStore(), now: () => clock, adProvider: instantAdProvider,
+      wrapState: (s) => new Proxy(s, {
+        set(t, k, v) { touched.push(k); t[k] = v; return true; },
+      }),
+    });
+    await probe.start();
+    probe.getState().coins = 7;
+    assert.ok(touched.includes('coins'), '对 state 的写入经过包装层');
+  }
+
   console.log('farm-app tests passed');
 })().catch((e) => { console.error(e); process.exit(1); });

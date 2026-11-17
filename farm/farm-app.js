@@ -32,7 +32,7 @@ const instantAdProvider = {
   async show() { return true; },
 };
 
-function createApp({ rules, store, now, adProvider }) {
+function createApp({ rules, store, now, adProvider, wrapState = (x) => x }) {
   let state = null;
   let lastSaveAt = 0;
 
@@ -45,7 +45,7 @@ function createApp({ rules, store, now, adProvider }) {
 
   async function start() {
     const loaded = await store.load();
-    state = loaded ? core.hydrate(loaded, rules) : core.createState(rules, now());
+    state = wrapState(loaded ? core.hydrate(loaded, rules) : core.createState(rules, now()));
 
     const elapsed = Math.max(0, now() - state.lastTickAt);
     let offline = null;

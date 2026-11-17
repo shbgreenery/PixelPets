@@ -115,7 +115,7 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
 
 </style>
 </head>
-<body>
+<body x-data="farm">
   <svg class="sprite" aria-hidden="true">
     <symbol id="i-wheat" viewBox="0 0 24 24"><path d="M12 21V7M12 10C9 10 7 8.3 7 5.5 10 5.5 12 7.2 12 10ZM12 10c3 0 5-1.7 5-4.5-3 0-5 1.7-5 4.5ZM12 16c-3 0-5-1.7-5-4.5 3 0 5 1.7 5 4.5ZM12 16c3 0 5-1.7 5-4.5-3 0-5 1.7-5 4.5ZM12 21l-3-3M12 21l3-3"/></symbol>
     <symbol id="i-mill" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/><circle cx="12" cy="12" r="1.8"/></symbol>
@@ -136,11 +136,13 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   </svg>
 
-  <main class="shop" id="shop">
+  <p x-show="!ui.ready" style="color:#A99C8C;font-size:12px;letter-spacing:.08em;">正在点亮工位牌…</p>
+  <template x-if="ui.ready">
+  <main class="shop" id="shop" x-init="afterReady()">
     <header class="top">
       <div class="brand"><small>夜班 · 第 18 盏灯</small><h1>麦田工坊</h1></div>
-      <div class="wallet"><span class="coin">◎</span><div><small>金币</small><strong id="coins">1,240</strong></div></div>
-      <div class="income"><small>收入 / 分钟</small><strong id="income">+32</strong></div>
+      <div class="wallet"><span class="coin">◎</span><div><small>金币</small><strong id="coins" x-text="fmt(s.coins)"></strong></div></div>
+      <div class="income"><small>收入 / 分钟</small><strong id="income" x-text="'+' + fmt(ui.incomePerMin)"></strong></div>
       <div class="utils">
         <button data-tab="farm" aria-label="前往农场"><svg><use href="#i-map"/></svg>农场</button>
         <button id="offlineBtn" aria-label="打开离线结算"><svg><use href="#i-clock"/></svg>离线</button>
@@ -148,26 +150,183 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
     </header>
 
     <section class="mini" aria-label="产线导轨">
-      <div class="minihead"><span>今夜导轨</span><strong id="railText">磨坊工位亮着</strong></div>
-      <div class="rail" id="rail"></div>
+      <div class="minihead"><span>今夜导轨</span><strong id="railText" x-text="railText()"></strong></div>
+      <div class="rail" id="rail" :style="'grid-template-columns: repeat(' + lineStages().length + ', 1fr)'">
+        <template x-for="stage in lineStages()" :key="stage.key">
+          <button :data-tab="stage.key" :aria-current="String(ui.tab === stage.key)"><i></i><span x-text="stage.name"></span></button>
+        </template>
+      </div>
     </section>
 
-    <nav class="lines" id="lines" aria-label="产线"></nav>
+    <nav class="lines" id="lines" aria-label="产线">
+      <template x-for="id in lines()" :key="id">
+        <button class="line-btn" :class="{ 'is-active': id === ui.line }" type="button" :data-line="id" x-text="LINES[id].name"></button>
+      </template>
+    </nav>
 
-    <nav class="tabs" id="tabs" role="tablist" aria-label="工位牌"></nav>
+    <nav class="tabs" id="tabs" role="tablist" aria-label="工位牌">
+      <template x-for="stage in lineStages()" :key="stage.key">
+        <button role="tab" :data-tab="stage.key" :aria-selected="String(ui.tab === stage.key)">
+          <span x-text="stage.name"></span>
+          <i class="tab-dot" x-show="tabDot(stage.key)"></i>
+        </button>
+      </template>
+      <button role="tab" data-tab="agency" :aria-selected="String(ui.tab === 'agency')">中介<i class="tab-dot" x-show="tabDot('agency')"></i></button>
+      <button role="tab" data-tab="tasks" :aria-selected="String(ui.tab === 'tasks')">任务<i class="tab-dot" x-show="tabDot('tasks')"></i></button>
+    </nav>
 
-    <section class="stage" id="stage" role="tabpanel"><div class="loading">正在点亮工位牌…</div></section>
-    <section class="tray" id="tray" aria-label="手边推车"></section>
+    <section class="stage" id="stage" role="tabpanel">
+      <template x-if="!isSource() && ui.tab !== 'agency' && ui.tab !== 'tasks'">
+        <div>
+          <div class="heading">
+            <h2 x-text="stage().name"></h2>
+            <span class="badge" x-text="cardList(true).length + ' / ' + stageNodes().length + ' 接通'"></span>
+          </div>
+          <div class="cards">
+            <template x-for="c in allCards()" :key="c.id">
+              <article class="card" :class="{ empty: !isUnlocked(c.id) }">
+                <div class="cardhead">
+                  <span class="num" x-text="'0' + c.slot"></span>
+                  <div class="name"><h3 x-text="world().mapDef.nodes[c.id].name"></h3><p x-text="isUnlocked(c.id) ? subLabel(c.id) : '未建 · 点下方建造'"></p></div>
+                  <span class="lv" x-show="isUnlocked(c.id)" x-text="'Lv.' + world().mapState.nodes[c.id].level"></span>
+                </div>
+                <template x-if="isUnlocked(c.id)">
+                  <div class="controls">
+                    <div class="ports" :class="{ one: !portData(c.id, 'out') }">
+                      <template x-if="portData(c.id, 'in')">
+                        <button class="port" :data-port-node="c.id" data-port-side="in" :data-port-item="portData(c.id, 'in').item">
+                          <div class="ptop"><span class="kind">输入</span><span class="pname"><svg><use :href="'#' + portData(c.id, 'in').icon"/></svg><span x-text="portData(c.id, 'in').name"></span></span><span class="qty"><span x-text="portData(c.id, 'in').qty"></span><em x-text="'/' + portData(c.id, 'in').cap"></em></span></div>
+                          <span class="bar"><i :style="'--fill:' + portData(c.id, 'in').fill + '%'"></i></span>
+                          <span class="reward" x-show="portData(c.id, 'in').reward" x-text="portData(c.id, 'in').reward"></span>
+                        </button>
+                      </template>
+                      <template x-if="portData(c.id, 'out')">
+                        <button class="port" :data-port-node="c.id" data-port-side="out" :data-port-item="portData(c.id, 'out').item">
+                          <div class="ptop"><span class="kind">输出</span><span class="pname"><svg><use :href="'#' + portData(c.id, 'out').icon"/></svg><span x-text="portData(c.id, 'out').name"></span></span><span class="qty"><span x-text="portData(c.id, 'out').qty"></span><em x-text="'/' + portData(c.id, 'out').cap"></em></span></div>
+                          <span class="bar"><i :style="'--fill:' + portData(c.id, 'out').fill + '%'"></i></span>
+                        </button>
+                      </template>
+                    </div>
+                    <button class="up" x-show="!upgradeLabel(c.id).maxed && !upgradeLabel(c.id).ad" :data-upgrade-node="c.id">升级<strong x-text="upgradeLabel(c.id).text"></strong></button>
+                    <button class="up ad" x-show="!upgradeLabel(c.id).maxed && upgradeLabel(c.id).ad" :data-upgrade-node="c.id">升级<span>广告</span></button>
+                    <button class="up maxed" x-show="upgradeLabel(c.id).maxed" disabled>已满级</button>
+                  </div>
+                </template>
+                <template x-if="isUnlocked(c.id) && !portData(c.id, 'out')">
+                  <div class="sale">
+                    <svg><use href="#i-coin"/></svg><span x-text="'结算 · 每 ' + settlementBeats(c.id) + ' 拍卖出'"></span><strong x-text="'+' + settlementCoins(c.id)"></strong>
+                  </div>
+                </template>
+                <template x-if="!isUnlocked(c.id)">
+                  <button class="build" :data-build="c.id"><span x-text="'建造 ' + world().mapDef.nodes[c.id].name"></span><strong x-text="unlockPrice(c.id)"></strong></button>
+                </template>
+              </article>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="isSource()">
+        <div>
+          <div class="heading"><h2 x-text="world().mapDef.nodes[stage().nodes[0]].name"></h2><span class="badge">无限产出</span></div>
+          <section class="farm">
+            <div class="field">
+              <small x-text="world().mapDef.nodes[stage().nodes[0]].name + ' · 不设上限'"></small>
+              <div class="inf">∞</div>
+              <template x-if="sourceItem() === 'wheat'">
+                <svg viewBox="0 0 360 245" preserveAspectRatio="none" aria-hidden="true"><g color="#D9A75C" opacity=".2" style="fill:none;stroke:currentColor;stroke-width:1.2"><use href="#i-wheat" x="4" y="150" width="46" height="46"/><use href="#i-wheat" x="42" y="134" width="56" height="56"/><use href="#i-wheat" x="80" y="118" width="66" height="66"/><use href="#i-wheat" x="118" y="150" width="46" height="46"/><use href="#i-wheat" x="156" y="134" width="56" height="56"/><use href="#i-wheat" x="194" y="118" width="66" height="66"/><use href="#i-wheat" x="232" y="150" width="46" height="46"/><use href="#i-wheat" x="270" y="134" width="56" height="56"/><use href="#i-wheat" x="308" y="118" width="66" height="66"/><use href="#i-wheat" x="338" y="150" width="46" height="46"/></g></svg>
+              </template>
+              <template x-if="sourceItem() === 'fish'">
+                <svg viewBox="0 0 360 245" preserveAspectRatio="none" aria-hidden="true"><g fill="none" stroke="#D9A75C" stroke-opacity=".18" stroke-width="1.4"><path d="M0 180 Q45 165 90 180 T180 180 T270 180 T360 180"/><path d="M0 205 Q45 190 90 205 T180 205 T270 205 T360 205"/><path d="M0 230 Q45 215 90 230 T180 230 T270 230 T360 230"/><path d="M40 150 Q60 140 80 150 T120 150" stroke-opacity=".1"/><path d="M220 160 Q240 150 260 160 T300 160" stroke-opacity=".1"/></g></svg>
+              </template>
+              <template x-if="sourceItem() === 'beef'">
+                <svg viewBox="0 0 360 245" preserveAspectRatio="none" aria-hidden="true"><g fill="none" stroke="#D9A75C" stroke-opacity=".18" stroke-width="1.4"><path d="M0 170h360M0 190h360M0 210h360"/><path d="M40 150v80M120 150v80M200 150v80M280 150v80M340 150v80"/><path d="M36 158h8M116 158h8M196 158h8M276 158h8M336 158h8"/><path d="M70 230l6-10 6 10M160 230l6-10 6 10M250 230l6-10 6 10" stroke-opacity=".12"/></g></svg>
+              </template>
+              <div class="fieldb" x-text="itemName(sourceItem()) + ' 无限供应'"></div>
+            </div>
+            <div class="farmfoot">
+              <div class="routes">
+                <template x-for="r in sourceRoutes()" :key="r.id">
+                  <span class="route" :class="{ on: r.built > 0 }" x-text="r.built > 0 ? r.built + ' 个' : r.name"></span>
+                </template>
+              </div>
+              <button class="harvest" data-action="harvest" :data-source="stage().nodes[0]" :data-item="sourceItem()" x-text="'取' + itemName(sourceItem())"></button>
+            </div>
+          </section>
+        </div>
+      </template>
+
+      <template x-if="ui.tab === 'agency'">
+        <div>
+          <div class="heading"><h2>中介处</h2><span class="badge">每个人单独升级</span></div>
+          <template x-for="agent in agents()" :key="agent.id">
+            <div class="agent-section">
+              <div class="agent-head"><h3 x-text="agent.name"></h3><button class="hire-btn" :data-hire="agent.id" x-text="'雇人 +' + agent.hirePrice"></button></div>
+              <template x-if="agent.workers.length === 0"><div class="agent-empty">还没有工人，点右上角雇一个</div></template>
+              <template x-for="worker in agent.workers" :key="worker.id">
+                <article class="card agent-card">
+                  <div class="cardhead"><span class="num" x-text="'0' + worker.slot"></span><div class="name"><h3 x-text="agent.name + ' ' + worker.slot"></h3><p x-text="agent.sub"></p></div><span class="lv" x-text="worker.speed + ' 拍'"></span></div>
+                  <div class="agent-body"><span class="agency-rate" x-text="'每 ' + worker.speed + ' 拍一趟 · 每趟 ' + worker.backpack + ' 个'"></span></div>
+                  <div class="agency-actions">
+                    <button class="route-action" :data-upgrade-worker="worker.speedLabel ? worker.id : null" data-worker-stat="speed" :data-worker-route="agent.id" :disabled="!worker.speedLabel"><span>速度升级</span><span class="price" x-show="!worker.speedAd" x-text="worker.speedLabel || '已满级'"></span><span class="ad-badge" x-show="worker.speedAd">广告</span></button>
+                    <button class="route-action" :data-upgrade-worker="worker.backpackLabel ? worker.id : null" data-worker-stat="backpack" :data-worker-route="agent.id" :disabled="!worker.backpackLabel"><span>背包升级</span><span class="price" x-show="!worker.backpackAd" x-text="worker.backpackLabel || '已满级'"></span><span class="ad-badge" x-show="worker.backpackAd">广告</span></button>
+                  </div>
+                </article>
+              </template>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="ui.tab === 'tasks'">
+        <div>
+          <div class="heading"><h2>任务</h2><span class="badge" x-text="'已完成 ' + questsView().claimed + ' 个'"></span></div>
+          <template x-for="q in questsView().active" :key="q.id">
+            <article class="card quest-card">
+              <div class="cardhead"><span class="num" x-text="'0' + q.slot"></span><div class="name"><h3 x-text="q.title"></h3><p x-text="q.desc"></p></div><span class="lv" x-text="'+' + q.reward"></span></div>
+              <div class="quest-conds">
+                <template x-for="(c, ci) in q.conds" :key="ci">
+                  <div class="quest-cond" :class="{ done: c.done }"><span x-text="c.label"></span><b x-text="c.progress"></b></div>
+                </template>
+              </div>
+              <div class="quest-actions">
+                <button class="route-action" :data-guide="q.guide" x-show="q.guide"><span>去完成</span><span>→</span></button>
+                <button class="route-action claim" :data-claim="q.done ? q.id : null" :disabled="!q.done"><span>领取</span><span class="price" x-text="'+' + q.reward"></span></button>
+              </div>
+            </article>
+          </template>
+          <div class="agent-empty" x-show="questsView().active.length === 0">所有任务都完成了</div>
+        </div>
+      </template>
+    </section>
+    <section class="tray" id="tray" aria-label="手边推车">
+      <button class="traybtn" :data-action="tray.action" :disabled="!tray.action">
+        <span class="glyph"><svg><use :href="'#' + tray.icon"/></svg></span>
+        <span class="tcopy"><strong x-text="tray.title"></strong><small x-text="tray.sub"></small></span>
+        <span class="arrow"><svg><use href="#i-arrow"/></svg></span>
+      </button>
+    </section>
 
     <footer class="dock">
       <div class="dockhead">
-        <div class="baglabel"><svg><use href="#i-bag"/></svg><strong>手边背包</strong><span><b id="bagTotal">6</b>/<b id="bagCap">10</b></span></div>
-        <div><button class="quiet" id="emptyBag">倒掉</button><button id="expandBag">扩容·180</button></div>
+        <div class="baglabel"><svg><use href="#i-bag"/></svg><strong>手边背包</strong><span><b x-text="s.player.qty"></b>/<b x-text="bagCap()"></b></span></div>
+        <div><button class="quiet" id="emptyBag">倒掉</button><button id="expandBag" x-text="expandLabel()"></button></div>
       </div>
-      <div class="binitems" id="bagItems"></div>
-      <div class="logbox"><div><span>最近日志</span><b id="logCount">3 条</b></div><ol id="logs"></ol></div>
+      <div class="binitems" id="bagItems">
+        <template x-if="s.player.qty > 0">
+          <span class="item"><svg style="width:12px;height:12px;fill:none;stroke:currentColor"><use :href="'#' + itemIcon(s.player.item)"/></svg><span x-text="itemName(s.player.item)"></span> <b x-text="s.player.qty"></b></span>
+        </template>
+      </div>
+      <div class="logbox"><div><span>最近日志</span><b id="logCount" x-text="ui.logs.length + ' 条'"></b></div>
+        <ol id="logs">
+          <template x-for="e in ui.logs" :key="e.id">
+            <li><time x-text="e.t"></time><b x-text="e.k"></b><span x-text="e.x"></span></li>
+          </template>
+        </ol>
+      </div>
     </footer>
   </main>
+  </template>
 
   <div class="modal" id="offline" aria-hidden="true">
     <button class="backdrop" data-close aria-label="关闭离线结算"></button>
@@ -203,6 +362,7 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script defer src="../assets/vendor/alpine-3.17.5.min.js"></script>
 <script src="farm-rules.js"></script>
 <script src="farm-core.js"></script>
 <script src="farm-store.js"></script>
@@ -249,22 +409,15 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
   const adProvider = { show: showMockAd };
 
   const store = createStore(localAdapter());
-  const app = createApp({
-    rules: rules,
-    store: store,
-    now: function () { return Date.now(); },
-    adProvider: adProvider,
-  });
+  let app = null;
+  let ui = null;
 
   const $ = function (sel, root) { return (root || document).querySelector(sel); };
-  const $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
   const fmt = function (n) { return Math.floor(n).toLocaleString('zh-CN'); };
 
   const RAIL_TEXT = { farm: '麦田永远有货', mills: '磨坊工位亮着', bakers: '面包机在烘', counters: '售货台在卖', flourShops: '面粉售货机亮着', fishPond: '鱼塘永远有鱼', fishKillers: '杀鱼机在切', canners: '罐头机在装', canShops: '罐头售货台在卖', fishSliceShops: '鱼片售货机亮着', ranch: '牧场货源充足', grinders: '绞肉机在转', burgerMakers: '汉堡机在煎', burgerShops: '汉堡售货台在卖', agency: '中介处 · 招工与工人升级', tasks: '任务 · 领取奖励' };
   const KIND_LABEL = { mill: '磨坊', baker: '面包机', counter: '面包售货台', flourShop: '面粉售货机', fishPond: '鱼塘', fishKiller: '杀鱼机', canner: '罐头机', canShop: '罐头售货台', fishSliceShop: '鱼片售货机', ranch: '牧场', grinder: '绞肉机', burgerMaker: '汉堡机', burgerShop: '汉堡售货台' };
 
-  let uiLine = 'bread';
-  let uiTab = 'farm';
   const ITEM_NAME = { wheat: '小麦', flour: '面粉', bread: '面包', fish: '鱼', fishSlice: '鱼片', can: '罐头', beef: '牛肉', patty: '肉饼', burger: '汉堡', coin: '金币' };
   const ITEM_ICON = { wheat: 'i-wheat', flour: 'i-flour', bread: 'i-bread', fish: 'i-fish', fishSlice: 'i-fillet', can: 'i-can', beef: 'i-beef', patty: 'i-patty', burger: 'i-burger', coin: 'i-coin' };
   const REASONS = {
@@ -283,11 +436,10 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
     no_state: '还没准备好',
   };
 
-  let logs = [];
   let lastOffline = null;
-  let incomePerMin = 0;
   let earnedWindow = [];
   let toastTimer = 0;
+  let logSeq = 0;
 
   function reasonText(reason) { return REASONS[reason] || '操作失败'; }
 
@@ -302,8 +454,8 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
 
   function addLog(kind, text) {
     const t = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-    logs.unshift({ t: t, k: kind, x: text });
-    if (logs.length > 3) logs.length = 3;
+    ui.logs.unshift({ id: ++logSeq, t: t, k: kind, x: text });
+    if (ui.logs.length > 3) ui.logs.length = 3;
   }
 
   function toast(text) {
@@ -353,178 +505,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
     return seconds + ' 秒';
   }
 
-  function portHtml(nodeId, side) {
-    const w = world();
-    const def = w.mapDef.nodes[nodeId];
-    const st = w.mapState.nodes[nodeId];
-    const level = def.levels[st.level - 1];
-    const list = side === 'in' ? (def.in || []) : (def.out || []);
-    const port = list[0];
-    if (!port) return '';
-    const item = port.item;
-    const cap = level.caps[side][item];
-    const qty = (st[side] && st[side][item]) || 0;
-    const fill = cap ? Math.round((qty / cap) * 100) : 0;
-    const reward = side === 'in' && port.coin ? '<span class="reward">送达 +' + port.coin + ' / 个</span>' : '';
-    return '<button class="port" data-port-node="' + nodeId + '" data-port-side="' + side + '" data-port-item="' + item + '">'
-      + '<div class="ptop"><span class="kind">' + (side === 'in' ? '输入' : '输出') + '</span>'
-      + '<span class="pname"><svg><use href="#' + itemIcon(item) + '"/></svg>' + itemName(item) + '</span>'
-      + '<span class="qty">' + fmt(qty) + '<em>/' + cap + '</em></span></div>'
-      + '<span class="bar"><i style="--fill:' + fill + '%"></i></span>'
-      + reward
-      + '</button>';
-  }
-
-  function upgradeHtml(nodeId, def, st) {
-    const cost = upgradeCost(rules, def, st.level);
-    if (!cost) return '<button class="up maxed" disabled>已满级</button>';
-    if (cost.coin != null) {
-      return '<button class="up" data-upgrade-node="' + nodeId + '">升级<strong>' + fmt(cost.coin) + '</strong></button>';
-    }
-    return '<button class="up ad" data-upgrade-node="' + nodeId + '">升级<span>广告</span></button>';
-  }
-
-  function card(nodeId, slotNo) {
-    const w = world();
-    const def = w.mapDef.nodes[nodeId];
-    const st = w.mapState.nodes[nodeId];
-
-    if (!st.unlocked) {
-      const cost = unlockCost(def);
-      return '<article class="card empty"><div class="cardhead"><span class="num">0' + slotNo + '</span>'
-        + '<div class="name"><h3>' + def.name + '</h3><p>未建 · 点下方建造</p></div></div>'
-        + '<button class="build" data-build="' + nodeId + '">建造' + def.name + '<strong>' + fmt(cost.coin) + '</strong></button>'
-        + '</article>';
-    }
-
-    const level = def.levels[st.level - 1];
-    const inPort = (def.in || [])[0];
-    const outPort = (def.out || [])[0];
-    const sub = (inPort ? itemName(inPort.item) : '原料')
-      + ' → ' + (outPort ? itemName(outPort.item) : '金币');
-    const coin = level.produce && level.produce.coin;
-    const sale = outPort ? ''
-      : '<div class="sale"><svg><use href="#i-coin"/></svg><span>结算 · 每 ' + level.beats + ' 拍卖出</span><strong>+' + coin + '</strong></div>';
-    const portIn = portHtml(nodeId, 'in');
-    const portOut = outPort ? portHtml(nodeId, 'out') : '';
-
-    return '<article class="card"><div class="cardhead"><span class="num">0' + slotNo + '</span>'
-      + '<div class="name"><h3>' + def.name + '</h3><p>' + sub + '</p></div>'
-      + '<span class="lv">Lv.' + st.level + '</span></div>'
-      + '<div class="controls"><div class="ports' + (outPort ? '' : ' one') + '">' + portIn + portOut + '</div>'
-      + upgradeHtml(nodeId, def, st) + '</div>'
-      + sale
-      + '</article>';
-  }
-
-  function heading(title, badge) {
-    return '<div class="heading"><h2>' + title + '</h2><span class="badge">' + badge + '</span></div>';
-  }
-
-  function wheatField() {
-    const xs = [4, 42, 80, 118, 156, 194, 232, 270, 308, 338];
-    const stalks = xs.map(function (x, i) {
-      const size = 46 + (i % 3) * 10;
-      return '<use href="#i-wheat" x="' + x + '" y="' + (150 - (i % 3) * 16) + '" width="' + size + '" height="' + size + '"/>';
-    }).join('');
-    return '<svg viewBox="0 0 360 245" preserveAspectRatio="none" aria-hidden="true">'
-      + '<g color="#D9A75C" opacity=".2" style="fill:none;stroke:currentColor;stroke-width:1.2">' + stalks + '</g>'
-      + '</svg>';
-  }
-
-  function waterField() {
-    return '<svg viewBox="0 0 360 245" preserveAspectRatio="none" aria-hidden="true">'
-      + '<g fill="none" stroke="#D9A75C" stroke-opacity=".18" stroke-width="1.4">'
-      + '<path d="M0 180 Q45 165 90 180 T180 180 T270 180 T360 180"/>'
-      + '<path d="M0 205 Q45 190 90 205 T180 205 T270 205 T360 205"/>'
-      + '<path d="M0 230 Q45 215 90 230 T180 230 T270 230 T360 230"/>'
-      + '<path d="M40 150 Q60 140 80 150 T120 150" stroke-opacity=".1"/>'
-      + '<path d="M220 160 Q240 150 260 160 T300 160" stroke-opacity=".1"/>'
-      + '</g></svg>';
-  }
-
-  function pastureField() {
-    return '<svg viewBox="0 0 360 245" preserveAspectRatio="none" aria-hidden="true">'
-      + '<g fill="none" stroke="#D9A75C" stroke-opacity=".18" stroke-width="1.4">'
-      + '<path d="M0 170h360M0 190h360M0 210h360"/>'
-      + '<path d="M40 150v80M120 150v80M200 150v80M280 150v80M340 150v80"/>'
-      + '<path d="M36 158h8M116 158h8M196 158h8M276 158h8M336 158h8"/>'
-      + '<path d="M70 230l6-10 6 10M160 230l6-10 6 10M250 230l6-10 6 10" stroke-opacity=".12"/>'
-      + '</g></svg>';
-  }
-
-  function sourceView(stage) {
-    const w = world();
-    const nodeId = stage.nodes[0];
-    const def = w.mapDef.nodes[nodeId];
-    const item = def.out[0].item;
-    const outgoing = Object.keys(w.mapDef.routes).map(function (id) {
-      return { id: id, def: w.mapDef.routes[id] };
-    }).filter(function (route) {
-      return route.def.fromKind === def.kind;
-    });
-    const chips = outgoing.map(function (route) {
-      const built = Object.keys(w.mapDef.nodes).filter(function (id) {
-        return w.mapDef.nodes[id].kind === route.def.toKind && w.mapState.nodes[id].unlocked;
-      }).length;
-      return '<span class="route' + (built ? ' on' : '') + '">' + (built ? built + ' 个' : route.def.name) + '</span>';
-    }).join('');
-    const visual = item === 'wheat' ? wheatField() : (item === 'fish' ? waterField() : pastureField());
-    return heading(def.name, '无限产出')
-      + '<section class="farm"><div class="field">'
-      + '<small>' + def.name + ' · 不设上限</small><div class="inf">∞</div>'
-      + visual
-      + '<div class="fieldb">' + itemName(item) + ' 无限供应</div></div>'
-      + '<div class="farmfoot"><div class="routes">' + chips + '</div>'
-      + '<button class="harvest" data-action="harvest" data-source="' + nodeId + '" data-item="' + item + '">取' + itemName(item) + '</button></div></section>';
-  }
-
-  function workerUpgradeButton(worker, routeId, stat, label, cost) {
-    const attrs = 'data-upgrade-worker="' + worker.id + '" data-worker-stat="' + stat + '" data-worker-route="' + routeId + '"';
-    if (!cost) {
-      return '<button class="route-action" type="button" disabled><span>' + label + '</span><span>已满级</span></button>';
-    }
-    if (cost.coin != null) {
-      return '<button class="route-action" type="button" ' + attrs + '><span>' + label + '升级</span><span class="price">' + fmt(cost.coin) + '</span></button>';
-    }
-    return '<button class="route-action" type="button" ' + attrs + '><span>' + label + '升级</span><span class="ad-badge">广告</span></button>';
-  }
-
-  function agentSection(agent) {
-    const w = world();
-    const rs = w.mapState.routes[agent.id];
-    const def = w.mapDef.routes[agent.id];
-    const hirePrice = hireCost(def, rs.workers.length);
-    const cards = rs.workers.map(function (worker, wi) {
-      return '<article class="card agent-card">'
-        + '<div class="cardhead"><span class="num">0' + (wi + 1) + '</span>'
-        + '<div class="name"><h3>' + agent.name + ' ' + (wi + 1) + '</h3><p>' + agent.sub + '</p></div>'
-        + '<span class="lv">' + worker.speed + ' 拍</span></div>'
-        + '<div class="agent-body"><span class="agency-rate">每 ' + worker.speed + ' 拍一趟 · 每趟 ' + worker.backpack + ' 个</span></div>'
-        + '<div class="agency-actions">'
-        + workerUpgradeButton(worker, agent.id, 'speed', '速度', workerUpgradeCost(def, worker, 'speed'))
-        + workerUpgradeButton(worker, agent.id, 'backpack', '背包', workerUpgradeCost(def, worker, 'backpack'))
-        + '</div></article>';
-    }).join('');
-    return '<div class="agent-section">'
-      + '<div class="agent-head"><h3>' + agent.name + '</h3>'
-      + '<button class="hire-btn" type="button" data-hire="' + agent.id + '">雇人 +' + fmt(hirePrice) + '</button></div>'
-      + (cards || '<div class="agent-empty">还没有工人，点右上角雇一个</div>')
-      + '</div>';
-  }
-
-  function agentDefs() {
-    const m = world().mapDef;
-    return Object.keys(m.routes).map(function (id) {
-      const def = m.routes[id];
-      return { id: id, name: def.name, sub: def.desc || '' };
-    });
-  }
-
-  function agencyView() {
-    return heading('中介处', '每个人单独升级') + agentDefs().map(agentSection).join('');
-  }
-
   function routeName(id) {
     const def = world().mapDef.routes[id];
     return def ? def.name : id;
@@ -548,71 +528,180 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
     }
   }
 
-  function conditionRow(cond) {
-    const current = Math.min(cond.current, cond.target);
-    return '<div class="quest-cond' + (cond.done ? ' done' : '') + '"><span>' + conditionLabel(cond) + '</span>'
-      + '<b>' + fmt(current) + '/' + fmt(cond.target) + '</b></div>';
-  }
-
-  function questView() {
-    const w = world();
-    const quests = rules.QUESTS || [];
-    const active = (w.s.quests.active || []).map(function (id) {
-      return quests.find(function (quest) { return quest.id === id; });
-    }).filter(Boolean);
-    const claimed = (w.s.quests.claimed || []).length;
-    const cards = active.map(function (quest, i) {
-      const status = questStatus(w.s, quest, rules);
-      const reward = quest.reward && quest.reward.coins ? quest.reward.coins : 0;
-      return '<article class="card quest-card">'
-        + '<div class="cardhead"><span class="num">0' + (i + 1) + '</span>'
-        + '<div class="name"><h3>' + quest.title + '</h3><p>' + quest.desc + '</p></div>'
-        + '<span class="lv">+' + fmt(reward) + '</span></div>'
-        + '<div class="quest-conds">' + status.conditions.map(conditionRow).join('') + '</div>'
-        + '<div class="quest-actions">'
-        + '<button class="route-action" type="button" data-guide="' + quest.guide + '"><span>去完成</span><span>→</span></button>'
-        + '<button class="route-action claim" type="button" data-claim="' + quest.id + '" ' + (status.done ? '' : 'disabled') + '><span>领取</span><span class="price">+' + fmt(reward) + '</span></button>'
-        + '</div></article>';
-    }).join('');
-    return heading('任务', '已完成 ' + claimed + ' 个') + (cards || '<div class="agent-empty">所有任务都完成了</div>');
-  }
-
   function currentStage() {
-    const line = LINES[uiLine];
-    return line ? line.stages.find(function (stage) { return stage.key === uiTab; }) : null;
-  }
-
-  function renderStage() {
-    const w = world();
-    let html = '';
-    if (uiTab === 'agency') {
-      html = agencyView();
-    } else if (uiTab === 'tasks') {
-      html = questView();
-    } else {
-      const stage = currentStage();
-      if (!stage) {
-        html = '<div class="agent-empty">这里没有工位</div>';
-      } else {
-        const firstDef = w.mapDef.nodes[stage.nodes[0]];
-        if (firstDef && firstDef.source) {
-          html = sourceView(stage);
-        } else {
-          const wired = stage.nodes.filter(function (id) { return w.mapState.nodes[id].unlocked; }).length;
-          html = heading(stage.name, wired + ' / ' + stage.nodes.length + ' 接通')
-            + '<div class="cards">' + stage.nodes.map(function (id, i) { return card(id, i + 1); }).join('') + '</div>';
-        }
-      }
-    }
-    const stageEl = $('#stage');
-    const top = stageEl.scrollTop;
-    stageEl.innerHTML = html;
-    stageEl.scrollTop = top;
+    const line = LINES[ui.line];
+    return line ? line.stages.find(function (stage) { return stage.key === ui.tab; }) : null;
   }
 
   function bagCap() {
     const s = app.getState();
     return PLAYER.levels[s.player.level - 1].cap;
+  }
+
+  function expandLabel() {
+    const s = app && app.getState();
+    if (!s) return '';
+    const cost = upgradeCost(rules, PLAYER, s.player.level);
+    if (!cost) return '背包已满级';
+    return '扩容·' + (cost.coin != null ? fmt(cost.coin) : '广告');
+  }
+
+  function railText() {
+    const line = LINES[ui.line];
+    const stage = line && line.stages.find(function (st) { return st.key === ui.tab; });
+    return RAIL_TEXT[ui.tab] || (stage ? stage.name + '工位' : '');
+  }
+
+  function stage() { return currentStage(); }
+  function stageNodes() { const st = currentStage(); return st ? st.nodes : []; }
+  function isUnlocked(id) {
+    const w = world();
+    return !!(w.mapState.nodes[id] && w.mapState.nodes[id].unlocked);
+  }
+  function isSource() {
+    const st = currentStage();
+    const w = world();
+    const def = st && w.mapDef.nodes[st.nodes[0]];
+    return !!(def && def.source);
+  }
+  function cardList(unlocked) {
+    return stageNodes().map(function (id, i) { return { id: id, slot: i + 1 }; })
+      .filter(function (c) { return isUnlocked(c.id) === unlocked; });
+  }
+  function allCards() {
+    return stageNodes().map(function (id, i) { return { id: id, slot: i + 1 }; });
+  }
+  function unlockPrice(id) { return fmt(unlockCost(world().mapDef.nodes[id]).coin); }
+  function subLabel(id) {
+    const def = world().mapDef.nodes[id];
+    const inp = (def.in || [])[0];
+    const out = (def.out || [])[0];
+    return (inp ? itemName(inp.item) : '原料') + ' → ' + (out ? itemName(out.item) : '金币');
+  }
+  function portData(id, side) {
+    const w = world();
+    const def = w.mapDef.nodes[id];
+    const st = w.mapState.nodes[id];
+    const level = def.levels[st.level - 1];
+    const list = side === 'in' ? (def.in || []) : (def.out || []);
+    const port = list[0];
+    if (!port) return null;
+    const cap = level.caps[side][port.item];
+    const qty = (st[side] && st[side][port.item]) || 0;
+    return {
+      item: port.item, name: itemName(port.item), icon: itemIcon(port.item),
+      qty: fmt(qty), cap: cap, fill: cap ? Math.round((qty / cap) * 100) : 0,
+      reward: side === 'in' && port.coin ? '送达 +' + port.coin + ' / 个' : '',
+    };
+  }
+  function upgradeLabel(id) {
+    const w = world();
+    const def = w.mapDef.nodes[id];
+    const st = w.mapState.nodes[id];
+    const cost = upgradeCost(rules, def, st.level);
+    if (!cost) return { maxed: true, ad: false, text: '已满级' };
+    if (cost.coin != null) return { maxed: false, ad: false, text: fmt(cost.coin) };
+    return { maxed: false, ad: true, text: '广告' };
+  }
+  function settlementBeats(id) {
+    const w = world();
+    return w.mapDef.nodes[id].levels[w.mapState.nodes[id].level - 1].beats;
+  }
+  function settlementCoins(id) {
+    const w = world();
+    const lv = w.mapDef.nodes[id].levels[w.mapState.nodes[id].level - 1];
+    return lv.produce && lv.produce.coin;
+  }
+  function sourceItem() {
+    const st = currentStage();
+    if (!st) return null;
+    const def = world().mapDef.nodes[st.nodes[0]];
+    return def && def.out && def.out[0] ? def.out[0].item : null;
+  }
+  function sourceRoutes() {
+    const w = world();
+    const st = currentStage();
+    if (!st) return [];
+    const def = w.mapDef.nodes[st.nodes[0]];
+    return Object.keys(w.mapDef.routes).map(function (id) {
+      const route = w.mapDef.routes[id];
+      if (route.fromKind !== def.kind) return null;
+      const built = Object.keys(w.mapDef.nodes).filter(function (nid) {
+        return w.mapDef.nodes[nid].kind === route.toKind && w.mapState.nodes[nid].unlocked;
+      }).length;
+      return { id: id, name: route.name, built: built };
+    }).filter(Boolean);
+  }
+  function lines() { return Object.keys(LINES); }
+  function lineStages() { return LINES[ui.line] ? LINES[ui.line].stages : []; }
+  function tabDot(tabKey) {
+    const s = app && app.getState();
+    if (!s) return false;
+    const quests = rules.QUESTS || [];
+    const active = (s.quests.active || []).map(function (id) {
+      return quests.find(function (q) { return q.id === id; });
+    }).filter(Boolean);
+    if (tabKey === 'tasks') return active.some(function (q) { return questStatus(s, q, rules).done; });
+    const guide = active.length ? active[0].guide : null;
+    return tabKey === guide;
+  }
+
+  function agents() {
+    const w = world();
+    return Object.keys(w.mapDef.routes).map(function (id) {
+      const def = w.mapDef.routes[id];
+      const rs = w.mapState.routes[id];
+      return {
+        id: id,
+        name: def.name,
+        sub: def.desc || '',
+        hirePrice: fmt(hireCost(def, rs.workers.length)),
+        workers: rs.workers.map(function (worker, wi) {
+          const speedCost = workerUpgradeCost(def, worker, 'speed');
+          const packCost = workerUpgradeCost(def, worker, 'backpack');
+          return {
+            id: worker.id,
+            slot: wi + 1,
+            speed: worker.speed,
+            backpack: worker.backpack,
+            speedLabel: speedCost ? (speedCost.coin != null ? fmt(speedCost.coin) : '广告') : null,
+            speedAd: !!(speedCost && speedCost.coin == null),
+            backpackLabel: packCost ? (packCost.coin != null ? fmt(packCost.coin) : '广告') : null,
+            backpackAd: !!(packCost && packCost.coin == null),
+          };
+        }),
+      };
+    });
+  }
+  function questsView() {
+    const w = world();
+    const quests = rules.QUESTS || [];
+    const active = (w.s.quests.active || []).map(function (id) {
+      return quests.find(function (q) { return q.id === id; });
+    }).filter(Boolean);
+    return {
+      claimed: (w.s.quests.claimed || []).length,
+      active: active.map(function (quest, i) {
+        const status = questStatus(w.s, quest, rules);
+        const reward = quest.reward && quest.reward.coins ? quest.reward.coins : 0;
+        return {
+          id: quest.id,
+          slot: i + 1,
+          title: quest.title,
+          desc: quest.desc,
+          reward: fmt(reward),
+          guide: quest.guide || null,
+          done: status.done,
+          conds: status.conditions.map(function (c) {
+            return {
+              label: conditionLabel(c),
+              progress: fmt(Math.min(c.current, c.target)) + '/' + fmt(c.target),
+              done: c.done,
+            };
+          }),
+        };
+      }),
+    };
   }
 
   function firstSpaceForItem(item) {
@@ -662,85 +751,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
     return { icon: itemIcon(bag.item), title: '送往' + target.name, sub: sub, action: 'carry' };
   }
 
-  function renderTray() {
-    const info = trayInfo();
-    $('#tray').innerHTML = '<button class="traybtn" ' + (info.action ? 'data-action="' + info.action + '"' : 'disabled') + '>'
-      + '<span class="glyph"><svg><use href="#' + info.icon + '"/></svg></span>'
-      + '<span class="tcopy"><strong>' + info.title + '</strong><small>' + info.sub + '</small></span>'
-      + '<span class="arrow"><svg><use href="#i-arrow"/></svg></span>'
-      + '</button>';
-  }
-
-  function renderDock() {
-    const s = app.getState();
-    const bag = s.player;
-    const cap = bagCap();
-    $('#bagTotal').textContent = bag.qty;
-    $('#bagCap').textContent = cap;
-    $('#bagItems').innerHTML = bag.qty > 0
-      ? '<span class="item"><svg style="width:12px;height:12px;fill:none;stroke:currentColor"><use href="#' + itemIcon(bag.item) + '"/></svg>'
-        + itemName(bag.item) + ' <b>' + bag.qty + '</b></span>'
-      : '';
-    const expandCost = upgradeCost(rules, PLAYER, bag.level);
-    $('#expandBag').textContent = expandCost
-      ? '扩容·' + (expandCost.coin != null ? fmt(expandCost.coin) : '广告')
-      : '背包已满级';
-    $('#logCount').textContent = logs.length + ' 条';
-    $('#logs').innerHTML = logs.map(function (e) {
-      return '<li><time>' + e.t + '</time><b>' + e.k + '</b><span>' + e.x + '</span></li>';
-    }).join('');
-  }
-
-  function renderChrome() {
-    const s = app.getState();
-    $('#coins').textContent = fmt(s.coins);
-    $('#income').textContent = '+' + fmt(incomePerMin);
-    $$('.tabs button').forEach(function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === uiTab)); });
-    $$('.rail button').forEach(function (b) { b.setAttribute('aria-current', String(b.dataset.tab === uiTab)); });
-    const current = currentStage();
-    $('#railText').textContent = RAIL_TEXT[uiTab] || (current ? current.name + '工位' : '');
-
-    const quests = rules.QUESTS || [];
-    const activeQuests = (s.quests.active || []).map(function (id) {
-      return quests.find(function (quest) { return quest.id === id; });
-    }).filter(Boolean);
-    const guideTab = activeQuests.length ? activeQuests[0].guide : null;
-    const claimable = activeQuests.some(function (quest) { return questStatus(s, quest, rules).done; });
-    $$('.tabs button').forEach(function (btn) {
-      const show = btn.dataset.tab === 'tasks' ? claimable : btn.dataset.tab === guideTab;
-      let dot = btn.querySelector('.tab-dot');
-      if (show && !dot) {
-        dot = document.createElement('i');
-        dot.className = 'tab-dot';
-        btn.appendChild(dot);
-      }
-      if (dot) dot.style.display = show ? 'block' : 'none';
-    });
-  }
-
-  function renderLines() {
-    if (!LINES[uiLine]) uiLine = Object.keys(LINES)[0];
-    const line = LINES[uiLine];
-    const lineIds = Object.keys(LINES);
-    $('#lines').innerHTML = lineIds.map(function (id) {
-      return '<button class="line-btn' + (id === uiLine ? ' is-active' : '') + '" type="button" data-line="' + id + '">' + LINES[id].name + '</button>';
-    }).join('');
-    $('#rail').innerHTML = line.stages.map(function (stage, i) {
-      return '<button data-tab="' + stage.key + '" data-station="' + i + '"><i></i><span>' + stage.name + '</span></button>';
-    }).join('');
-    $('#rail').style.gridTemplateColumns = 'repeat(' + line.stages.length + ',1fr)';
-    $('#tabs').innerHTML = line.stages.map(function (stage) {
-      return '<button role="tab" data-tab="' + stage.key + '">' + stage.name + '</button>';
-    }).join('') + '<button role="tab" data-tab="agency">中介</button><button role="tab" data-tab="tasks">任务</button>';
-  }
-
-  function render() {
-    renderChrome();
-    renderStage();
-    renderTray();
-    renderDock();
-  }
-
   function showOffline(info) {
     if (!info) return;
     const dl = $('#offline dl');
@@ -761,7 +771,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
         const r = app.take(w.mapId, stage.nodes[0], item);
         if (r.ok) addLog('取货', firstDef.name + ' → 背包 ' + itemName(item) + ' +' + r.qty);
         else fail(r);
-        render();
         return;
       }
       for (const id of stage.nodes) {
@@ -773,7 +782,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
         const r = app.take(w.mapId, id, item);
         if (r.ok) addLog('取货', def.name + ' → 背包 ' + itemName(item) + ' +' + r.qty);
         else fail(r);
-        render();
         return;
       }
     }
@@ -804,20 +812,17 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
     } else {
       fail(r);
     }
-    render();
   }
 
   async function handleClick(ev) {
-    const s = app.getState();
+    const s = app && app.getState();
     if (!s) return;
 
     const lineBtn = ev.target.closest('[data-line]');
     if (lineBtn) {
-      uiLine = lineBtn.dataset.line;
-      const line = LINES[uiLine];
-      uiTab = line ? line.stages[0].key : uiTab;
-      renderLines();
-      render();
+      ui.line = lineBtn.dataset.line;
+      const line = LINES[ui.line];
+      ui.tab = line ? line.stages[0].key : ui.tab;
       return;
     }
 
@@ -827,12 +832,10 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
       const lineId = Object.keys(LINES).find(function (id) {
         return LINES[id].stages.some(function (stage) { return stage.key === key; });
       });
-      if (lineId && lineId !== uiLine) {
-        uiLine = lineId;
-        renderLines();
+      if (lineId && lineId !== ui.line) {
+        ui.line = lineId;
       }
-      uiTab = key;
-      render();
+      ui.tab = key;
       return;
     }
 
@@ -858,7 +861,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
       } else {
         fail(r);
       }
-      render();
       return;
     }
 
@@ -869,7 +871,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
       const r = app.hire(w.mapId, routeId);
       if (r.ok) addLog('雇人', w.mapDef.routes[routeId].name + ' 新增 1 人，现有 ' + w.mapState.routes[routeId].workers.length + ' 人');
       else fail(r);
-      render();
       return;
     }
 
@@ -879,10 +880,8 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
       const lineId = Object.keys(LINES).find(function (id) {
         return LINES[id].stages.some(function (stage) { return stage.key === key; });
       });
-      if (lineId) uiLine = lineId;
-      uiTab = key;
-      renderLines();
-      render();
+      if (lineId) ui.line = lineId;
+      ui.tab = key;
       return;
     }
 
@@ -895,7 +894,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
       } else {
         fail(r);
       }
-      render();
       return;
     }
 
@@ -906,7 +904,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
       const r = await Promise.resolve(app.upgradeNode(w.mapId, nodeId));
       if (r.ok) addLog('升级', w.mapDef.nodes[nodeId].name + ' 升到 Lv.' + app.getState().maps[w.mapId].nodes[nodeId].level);
       else fail(r);
-      render();
       return;
     }
 
@@ -919,7 +916,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
       const r = await Promise.resolve(app.upgradeWorker(w.mapId, routeId, workerId, stat));
       if (r.ok) addLog('工人升级', w.mapDef.routes[routeId].name + (stat === 'speed' ? ' 速度升级' : ' 背包升级'));
       else fail(r);
-      render();
       return;
     }
 
@@ -930,7 +926,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
       const r = app.unlockNode(w.mapId, nodeId);
       if (r.ok) addLog('建造', w.mapDef.nodes[nodeId].name + ' 已接通');
       else fail(r);
-      render();
       return;
     }
 
@@ -945,7 +940,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
         const r = app.take(w.mapId, sourceId, item);
         if (r.ok) addLog('取货', w.mapDef.nodes[sourceId].name + ' → 背包 ' + itemName(item) + ' +' + r.qty);
         else fail(r);
-        render();
       }
       return;
     }
@@ -953,7 +947,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
     if (ev.target.closest('#emptyBag')) {
       const r = app.discard();
       if (r.ok && r.qty > 0) addLog('倒掉', '背包里的' + itemName(r.item) + '已清空');
-      render();
       return;
     }
 
@@ -961,7 +954,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
       const r = await Promise.resolve(app.upgradeBackpack());
       if (r.ok) addLog('扩容', '背包容量提升到 ' + bagCap());
       else fail(r);
-      render();
       return;
     }
 
@@ -980,7 +972,6 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
       } else {
         toast(reasonText(r.reason));
       }
-      render();
       return;
     }
 
@@ -1002,22 +993,71 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
   }
 
   function tickLoop() {
-    if (!app.getState()) return;
+    if (!app || !app.getState()) return;
     const r = app.tick();
     earnedWindow.push(r.coinsEarned || 0);
     if (earnedWindow.length > 60) earnedWindow.shift();
-    incomePerMin = earnedWindow.reduce(function (a, b) { return a + b; }, 0);
-    render();
+    ui.incomePerMin = earnedWindow.reduce(function (a, b) { return a + b; }, 0);
   }
 
   async function boot() {
     const res = await app.start();
     lastOffline = res.offline;
-    renderLines();
-    render();
-    if (res.offline) showOffline(res.offline);
-    setInterval(tickLoop, 1000);
+    ui.ready = true;
   }
+
+  let tickTimer = 0;
+  function afterReady() {
+    if (tickTimer) return;
+    tickTimer = setInterval(tickLoop, 1000);
+    if (lastOffline) showOffline(lastOffline);
+  }
+
+  document.addEventListener('alpine:init', function () {
+    ui = Alpine.reactive({
+      tab: 'farm',
+      line: 'bread',
+      logs: [],
+      incomePerMin: 0,
+      ready: false,
+    });
+
+    Alpine.data('farm', function () {
+      return {
+        ui: ui,
+        fmt: fmt,
+        itemName: itemName,
+        itemIcon: itemIcon,
+        world: world,
+        bagCap: bagCap,
+        expandLabel: expandLabel,
+        railText: railText,
+        stage: stage, stageNodes: stageNodes, isUnlocked: isUnlocked, isSource: isSource,
+        cardList: cardList, allCards: allCards, unlockPrice: unlockPrice, subLabel: subLabel,
+        portData: portData, upgradeLabel: upgradeLabel,
+        settlementBeats: settlementBeats, settlementCoins: settlementCoins,
+        sourceItem: sourceItem, sourceRoutes: sourceRoutes,
+        agents: agents, questsView: questsView,
+        lines: lines, lineStages: lineStages, tabDot: tabDot, LINES: LINES,
+        afterReady: afterReady,
+        get tray() { return trayInfo(); },
+        get s() { return app && app.getState(); },
+      };
+    });
+
+    app = createApp({
+      rules: rules,
+      store: store,
+      now: function () { return Date.now(); },
+      adProvider: adProvider,
+      wrapState: Alpine.reactive,
+    });
+
+    boot().catch(function (e) {
+      console.error(e);
+      toast('启动失败');
+    });
+  });
 
   document.addEventListener('click', function (ev) {
     handleClick(ev).catch(function () { toast('操作失败'); });
@@ -1032,26 +1072,21 @@ button{font:inherit;color:inherit;border:0;cursor:pointer;-webkit-tap-highlight-
 
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
-      app.save();
+      if (app) app.save();
       return;
     }
-    if (!app.getState()) return;
+    if (!app || app.getState() === null) return;
     try {
       const res = app.resume();
       if (res.offline) lastOffline = res.offline;
       earnedWindow = [];
-      incomePerMin = 0;
-      render();
+      ui.incomePerMin = 0;
       if (res.offline) showOffline(res.offline);
     } catch (e) {
       toast('结算失败');
     }
   });
 
-  boot().catch(function (e) {
-    console.error(e);
-    toast('启动失败');
-  });
 })();
 
 </script>
