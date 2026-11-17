@@ -30,7 +30,7 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-
 button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
 
 .frame{
-  position:relative;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) 92px;
+  position:relative;display:grid;grid-template-rows:auto auto auto auto minmax(0,1fr) 92px;
   width:min(430px,100vw);height:min(880px,100dvh);margin:0 auto;overflow:hidden;
   border:1px solid #d9a75c33;border-radius:16px;background:var(--night);
   box-shadow:0 30px 80px #000000b8;
@@ -38,7 +38,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
 @media (max-height:880px){.frame{border-radius:0;height:100dvh}}
 
 /* 状态条 */
-.hud{display:grid;grid-template-columns:1fr repeat(4,auto);align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #d9a75c26}
+.hud{display:grid;grid-template-columns:1fr repeat(4,auto) auto;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #d9a75c26}
 .brand small{display:block;color:var(--text-dim);font:9px var(--mono);letter-spacing:.14em}
 .brand h1{margin:2px 0 0;font:700 19px/1.1 var(--serif);letter-spacing:.08em;white-space:nowrap}
 .stat{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0}
@@ -47,7 +47,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
 .stat b.bump{color:var(--amber)}
 
 /* 页签 */
-.tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;padding:6px 10px}
+.tabs{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;padding:6px 10px}
 .tabs button{height:40px;border:1px solid #4B3828;border-radius:4px;color:var(--text-dim);background:var(--surface);font-size:12px;transition:.2s}
 .tabs button[aria-selected="true"]{color:var(--text);border-color:#d9a75cb8;background:var(--surface-hi)}
 
@@ -152,6 +152,41 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
 .recipe-time{color:#8A6534;font:11px var(--mono)}
 .recipe .btn{min-height:32px;border-color:#C9B9A0;color:#2A231D;background:#EFE6D6}
 
+/* 任务条 */
+.taskbar{display:flex;align-items:center;gap:8px;margin:0 12px 6px;padding:7px 10px;border:1px solid #d9a75c66;border-radius:6px;background:linear-gradient(100deg,#d9a75c1f,transparent),var(--surface)}
+.task-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.task-copy b{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-copy small{color:var(--text-dim);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-reward{color:var(--amber);font:700 12px var(--mono);white-space:nowrap}
+
+/* 浮动收益 */
+.float-gain{position:fixed;z-index:60;color:var(--amber);font:700 13px var(--mono);pointer-events:none;animation:floatUp .9s ease-out forwards}
+@keyframes floatUp{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-34px)}}
+
+/* 回归报告 */
+.away-list{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:8px}
+.away-list li{display:flex;justify-content:space-between;align-items:baseline;padding:8px 10px;border:1px solid #D8C9B0;border-radius:6px;background:#EFE6D6;color:#2A231D;font-size:13px}
+.away-list b{color:#8A6534;font:700 14px var(--mono)}
+.away-empty{margin:14px 0 0;color:#7A6855;font-size:12px}
+.hud-btn{padding:4px 6px;border:1px solid var(--line);border-radius:4px;color:var(--text-dim);font-size:10px;white-space:nowrap}
+.hud-btn:hover{color:var(--text)}
+
+.stats-list{list-style:none;margin:0 0 10px;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.stats-list li{padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);display:flex;flex-direction:column;gap:2px}
+.stats-list span{color:var(--text-dim);font-size:10px}
+.stats-list b{color:var(--brass);font:700 14px var(--mono)}
+.deed-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.card-item.deed{opacity:.55;border-style:dashed}
+.card-item.deed.done{opacity:1;border-style:solid;border-color:#d9a75c8c;background:linear-gradient(100deg,#d9a75c1a,transparent),var(--surface)}
+.card-item.deed .ci-qty{font-size:13px}
+
+.setting-list{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:8px}
+.setting-list li{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #D8C9B0;border-radius:6px;background:#EFE6D6;color:#2A231D;font-size:13px}
+.switch{min-width:52px;padding:5px 12px;border:1px solid #C9B9A0;border-radius:14px;color:#7A6855;background:#E4D8C6;font-size:12px}
+.switch.on{color:var(--ink);border-color:var(--amber);background:var(--amber)}
+
+.away-ok{width:100%;margin-top:16px;min-height:42px;border-color:var(--amber);color:var(--ink);background:var(--amber)}
+
 /* 养殖 */
 .yard{margin-bottom:14px}
 .card-item.animal.growing .ci-qty{color:var(--amber)}
@@ -171,6 +206,8 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
 .order-reward{display:flex;flex-direction:column;color:var(--brass);font:11px var(--mono)}
 .order-lines{display:flex;flex-direction:column;gap:2px;color:var(--text-dim);font-size:11px}
 .order-lines .short{color:#C4553F}
+.card-item.order.daily{border-color:var(--brass);box-shadow:0 0 0 1px #d9a75c55 inset}
+.card-item.order.daily .ci-name{color:var(--amber)}
 .card-item.order.ready{border-color:#e0a44aad;background:linear-gradient(100deg,#e0a44a22,transparent),var(--surface)}
 .order-actions{display:flex;gap:5px;margin-top:auto}
 .order-actions .btn{flex:1;min-height:32px;padding:0 6px;font-size:12px}
@@ -202,6 +239,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
     <div class="stat"><small>钻石</small><b data-gems :class="flash.gems ? 'bump' : ''" x-text="hudView().gems">0</b></div>
     <div class="stat"><small>等级</small><b data-level x-text="hudView().level">1</b></div>
     <div class="stat"><small>仓库</small><b data-silo x-text="hudView().siloText">0/30</b></div>
+    <button class="hud-btn" data-open-settings>设置</button>
   </header>
 
   <div id="xpbar" class="xpbar">
@@ -209,13 +247,24 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
     <span x-text="levelInfo().text"></span>
   </div>
 
+  <div id="taskbar" class="taskbar" x-show="currentTask()">
+    <div class="task-copy">
+      <b x-text="currentTask() ? currentTask().title : ''"></b>
+      <small x-text="currentTask() ? (currentTask().hint + ' · ' + currentTask().progress) : ''"></small>
+    </div>
+    <span class="task-reward" x-text="currentTask() ? ('+' + currentTask().reward) : ''"></span>
+    <button class="mini-btn" x-show="currentTask() && currentTask().tab"
+            @click="switchTab(currentTask().tab)">前往</button>
+  </div>
+
   <nav id="tabs" class="tabs">
-    <button data-tab="farm" :aria-selected="tab==='farm'" @click="tab='farm'">农场</button>
-    <button data-tab="machines" :aria-selected="tab==='machines'" @click="tab='machines'">机器</button>
-    <button data-tab="orders" :aria-selected="tab==='orders'" @click="tab='orders'">订单</button>
-    <button data-tab="animals" :aria-selected="tab==='animals'" @click="tab='animals'">养殖</button>
-    <button data-tab="shop" :aria-selected="tab==='shop'" @click="tab='shop'">商场</button>
-    <button data-tab="silo" :aria-selected="tab==='silo'" @click="tab='silo'">仓库</button>
+    <button data-tab="farm" :aria-selected="tab==='farm'" @click="switchTab('farm')">农场</button>
+    <button data-tab="machines" :aria-selected="tab==='machines'" @click="switchTab('machines')">机器</button>
+    <button data-tab="orders" :aria-selected="tab==='orders'" @click="switchTab('orders')">订单</button>
+    <button data-tab="animals" :aria-selected="tab==='animals'" @click="switchTab('animals')">养殖</button>
+    <button data-tab="shop" :aria-selected="tab==='shop'" @click="switchTab('shop')">商场</button>
+    <button data-tab="silo" :aria-selected="tab==='silo'" @click="switchTab('silo')">仓库</button>
+    <button data-tab="deeds" :aria-selected="tab==='deeds'" @click="switchTab('deeds')">成就</button>
   </nav>
 
   <div class="stage">
@@ -287,8 +336,8 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
       <h2>订单<small x-text="orderSlotInfo().text"></small></h2>
       <ul id="orders" class="grid-cards">
         <template x-for="order in ordersView()" :key="order.id">
-          <li class="card-item order" :class="order.deliverable ? 'ready' : ''">
-            <div class="ci-name" x-text="'订单 ' + order.id"></div>
+          <li class="card-item order" :class="(order.deliverable ? 'ready ' : '') + (order.daily ? 'daily' : '')">
+            <div class="ci-name"><span x-text="order.daily ? '每日特供' : ('订单 ' + order.id)"></span></div>
             <div class="order-reward">
               <span x-text="'金币 +' + order.coins"></span>
               <span x-text="'经验 +' + order.xp"></span>
@@ -302,7 +351,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
             <div class="order-actions">
               <button class="btn" :class="order.deliverable ? 'solid' : ''"
                       :disabled="!order.deliverable" :data-deliver="order.id">交付</button>
-              <button class="btn quiet" :data-abandon-order="order.id">放弃</button>
+              <button class="btn quiet" x-show="!order.daily" :data-abandon-order="order.id">放弃</button>
             </div>
           </li>
         </template>
@@ -402,6 +451,24 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
       </ul>
     </section>
 
+  <section id="panel-deeds" class="panel" x-show="tab==='deeds'">
+      <h2>成就<small x-text="unlockedCount()"></small></h2>
+      <ul class="stats-list">
+        <template x-for="row in statsView()" :key="row.key">
+          <li><span x-text="row.label"></span><b x-text="row.value"></b></li>
+        </template>
+      </ul>
+      <ul class="grid-cards deed-grid">
+        <template x-for="deed in achievementsView()" :key="deed.id">
+          <li class="card-item deed" :class="deed.unlocked ? 'done' : ''">
+            <div class="ci-name" x-text="deed.name"></div>
+            <div class="ci-qty" x-text="deed.unlocked ? '已达成' : deed.progress"></div>
+            <div class="ci-tag" x-text="deed.desc"></div>
+          </li>
+        </template>
+      </ul>
+    </section>
+
   </div>
 
   <section id="logs" class="logbox">
@@ -457,6 +524,37 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
     </div>
   </div>
 </div>
+<div id="settings-modal" class="modal" :aria-hidden="settingsOpen ? 'false' : 'true'">
+  <button class="backdrop" data-close-settings aria-label="关闭"></button>
+  <div class="paper">
+    <small>设置</small>
+    <h2>选项</h2>
+    <ul class="setting-list">
+      <li>
+        <span>音效</span>
+        <button class="switch" :class="soundOn ? 'on' : ''" data-toggle-sound
+                x-text="soundOn ? '开' : '关'"></button>
+      </li>
+    </ul>
+    <button class="btn solid away-ok" data-close-settings>关闭</button>
+  </div>
+</div>
+
+<div id="away-modal" class="modal" :aria-hidden="awayReport ? 'false' : 'true'">
+  <button class="backdrop" data-close-away aria-label="关闭"></button>
+  <div class="paper">
+    <small>欢迎回来</small>
+    <h2 x-text="awayReport ? awayReport.title : ''"></h2>
+    <ul class="away-list" x-show="awayReport && awayReport.rows.length > 0">
+      <template x-for="row in awayReport ? awayReport.rows : []" :key="row.key">
+        <li><span x-text="row.label"></span><b x-text="row.value"></b></li>
+      </template>
+    </ul>
+    <p class="away-empty" x-show="awayReport && awayReport.rows.length === 0">一切照常，没有等你处理的东西。</p>
+    <button class="btn solid away-ok" data-close-away>知道了</button>
+  </div>
+</div>
+
 <div id="machine-modal" class="modal" :aria-hidden="machineDetail ? 'false' : 'true'">
   <button class="backdrop" data-close-machine aria-label="关闭"></button>
   <div class="paper paper-wide">
@@ -520,11 +618,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
 (function () {
   'use strict';
 
-  var rules = {
-    ITEMS: ITEMS, CROPS: CROPS, MACHINES: MACHINES, RECIPES: RECIPES, QUEUE: QUEUE,
-    LEVELS: LEVELS, PLOTS: PLOTS, SILO: SILO, ORDERS: ORDERS,
-    ANIMALS: ANIMALS, GEMS: GEMS, SELL_RATIO: SELL_RATIO, START: START,
-  };
+  var rules = RULES;
 
   var logSeq = 0;
   var LOG_LIMIT = 30;
@@ -571,9 +665,13 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
         seedPicker: false,
         seedPickerTarget: null,
         machineDetail: null,
+        awayReport: null,
+        settingsOpen: false,
+        soundOn: soundEnabled,
         sellPicker: { open: false, id: '', name: '', max: 0, quantity: 1 },
         flash: { coins: false, gems: false },
         lastCoins: null,
+        lastLevel: null,
         lastGems: null,
         app: createApp({
           rules: rules,
@@ -588,21 +686,33 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
           this.state = started.state;
           this.nowTick = Date.now();
           this.addLog('欢迎来到慢慢农场');
+          if (started.awayMs > 120000) this.showAway(started.awayMs);
           activeInstance = this;
           this.syncHud();
           startTimer(this);
+          this.app.visitTab(this.tab).catch(function () {});
         },
 
         syncHud() {
           var hud = this.hudView();
           this.lastCoins = hud.coins;
           this.lastGems = hud.gems;
+          this.lastLevel = levelOf(this.state.xp, rules);
         },
 
         tick() {
           this.nowTick = Date.now();
           if (!this.state) return;
           var hud = this.hudView();
+
+          var level = levelOf(this.state.xp, rules);
+          if (this.lastLevel !== null && level > this.lastLevel) SOUNDS.levelup();
+          this.lastLevel = level;
+
+          var coinsNow = Number(hud.coins);
+          if (this.lastCoins !== null && coinsNow > Number(this.lastCoins)) {
+            floatGain(coinsNow - Number(this.lastCoins));
+          }
           if (this.lastCoins !== null && hud.coins !== this.lastCoins) this.bump('coins');
           if (this.lastGems !== null && hud.gems !== this.lastGems) this.bump('gems');
           this.lastCoins = hud.coins;
@@ -613,6 +723,16 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
           var self = this;
           this.flash[key] = true;
           setTimeout(function () { self.flash[key] = false; }, 150);
+        },
+
+        showAway(awayMs) {
+          var sum = waitingSummary(this.state, this.nowTick, rules);
+          var rows = [];
+          if (sum.plots > 0) rows.push({ key: 'plot', label: '可以收的作物', value: sum.plots + ' 块' });
+          if (sum.machineItems > 0) rows.push({ key: 'machine', label: '机器产出', value: sum.machineItems + ' 件' });
+          if (sum.animalItems > 0) rows.push({ key: 'animal', label: '动物产出', value: sum.animalItems + ' 份' });
+          if (sum.orders > 0) rows.push({ key: 'order', label: '可以交的订单', value: sum.orders + ' 张' });
+          this.awayReport = { title: '你离开了 ' + formatDuration(awayMs), rows: rows };
         },
 
         addLog(text) {
@@ -731,6 +851,70 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
             }
           }
           return slots;
+        },
+
+        currentTask() {
+          var s = this.state;
+          if (!s) return null;
+          var task = TASKS[s.taskIndex];
+          if (!task) return null;
+          var value = taskMetric(s, task.check.metric, rules);
+          return {
+            id: task.id,
+            title: task.title,
+            hint: task.hint,
+            tab: task.tab,
+            reward: task.reward,
+            progress: Math.min(value, task.check.goal) + ' / ' + task.check.goal,
+          };
+        },
+
+        switchTab(name) {
+          this.tab = name;
+          var self = this;
+          this.app.visitTab(name).then(function (res) {
+            if (res.tasks) res.tasks.forEach(function (task) {
+              self.addLog('任务完成：' + task.title + '  +' + task.reward + ' 金币');
+            });
+            if (res.unlocked) res.unlocked.forEach(function (deed) {
+              self.addLog('成就解锁：' + deed.name + '  +' + (deed.reward || 0) + ' 金币');
+            });
+          }).catch(function () {});
+        },
+
+        unlockedCount() {
+          var s = this.state;
+          if (!s) return '';
+          var done = ACHIEVEMENTS.filter(function (def) { return s.achievements[def.id]; }).length;
+          return done + ' / ' + ACHIEVEMENTS.length;
+        },
+
+        statsView() {
+          var s = this.state;
+          if (!s) return [];
+          return [
+            { key: 'harvested', label: '累计收获', value: s.stats.harvested },
+            { key: 'crafted', label: '累计加工', value: s.stats.crafted },
+            { key: 'animalItems', label: '动物产出', value: s.stats.animalItems },
+            { key: 'delivered', label: '交付订单', value: s.stats.delivered },
+            { key: 'earned', label: '累计收入', value: s.stats.earned },
+            { key: 'level', label: '当前等级', value: 'Lv.' + levelOf(s.xp, rules) },
+          ];
+        },
+
+        achievementsView() {
+          var s = this.state;
+          if (!s) return [];
+          return ACHIEVEMENTS.map(function (def) {
+            var value = metricValue(s, def.metric, rules);
+            return {
+              id: def.id,
+              name: def.name,
+              desc: def.desc,
+              unlocked: Boolean(s.achievements[def.id]),
+              progress: Math.min(value, def.goal) + ' / ' + def.goal,
+            };
+          });
         },
 
         yardsView() {
@@ -863,25 +1047,10 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
         ordersView() {
           var s = this.state;
           if (!s) return [];
-          return s.orders.map(function (order) {
-            var lines = order.lines.map(function (line) {
-              var owned = s.silo[line.itemId] || 0;
-              return {
-                itemId: line.itemId,
-                name: ITEMS[line.itemId].name,
-                quantity: line.quantity,
-                owned: owned,
-                enough: owned >= line.quantity,
-              };
-            });
-            return {
-              id: order.id,
-              coins: order.coins,
-              xp: order.xp,
-              lines: lines,
-              deliverable: lines.every(function (line) { return line.enough; }),
-            };
-          });
+          var list = [];
+          if (s.dailyOrder) list.push(toOrderView(s, s.dailyOrder, true));
+          s.orders.forEach(function (order) { list.push(toOrderView(s, order, false)); });
+          return list;
         },
 
         siloView() {
@@ -1008,6 +1177,10 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
   var ACTION_ATTRS = [
     'data-open-machine',
     'data-close-machine',
+    'data-close-away',
+    'data-open-settings',
+    'data-close-settings',
+    'data-toggle-sound',
     'data-collect-machine',
     'data-enqueue',
     'data-unlock-recipe',
@@ -1070,6 +1243,86 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
     }).join(' ');
   }
 
+  // 音效用 WebAudio 现场合成，不引任何资源文件
+  var SOUND_KEY = 'pixelpets.slowfarm.sound';
+  var soundEnabled = true;
+  try {
+    soundEnabled = localStorage.getItem(SOUND_KEY) !== '0';
+  } catch (e) {
+    soundEnabled = true;
+  }
+
+  var audioCtx = null;
+  function beep(freq, duration, type, volume) {
+    if (!soundEnabled) return;
+    try {
+      if (!audioCtx) {
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        audioCtx = new Ctx();
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.value = freq;
+      var now = audioCtx.currentTime;
+      gain.gain.setValueAtTime(volume || 0.05, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + duration);
+    } catch (e) {
+      // 音频被浏览器策略拦住时静默跳过
+    }
+  }
+
+  var SOUNDS = {
+    harvest: function () { beep(660, 0.12, 'triangle', 0.05); },
+    deliver: function () { beep(523, 0.1); setTimeout(function () { beep(784, 0.16); }, 90); },
+    levelup: function () { [523, 659, 784].forEach(function (f, i) { setTimeout(function () { beep(f, 0.18, 'sine', 0.06); }, i * 90); }); },
+    coin: function () { beep(880, 0.08, 'square', 0.03); },
+    error: function () { beep(180, 0.16, 'sawtooth', 0.04); },
+  };
+
+  function floatGain(amount) {
+    if (!amount) return;
+    var anchor = document.querySelector('#hud [data-coins]');
+    if (!anchor) return;
+    var rect = anchor.getBoundingClientRect();
+    var el = document.createElement('div');
+    el.className = 'float-gain';
+    el.textContent = '+' + amount;
+    el.style.left = rect.left + 'px';
+    el.style.top = rect.top + 'px';
+    document.body.appendChild(el);
+    setTimeout(function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, 900);
+  }
+
+  function toOrderView(state, order, daily) {
+    var lines = order.lines.map(function (line) {
+      var owned = state.silo[line.itemId] || 0;
+      return {
+        itemId: line.itemId,
+        name: ITEMS[line.itemId].name,
+        quantity: line.quantity,
+        owned: owned,
+        enough: owned >= line.quantity,
+      };
+    });
+    return {
+      id: order.id,
+      coins: order.coins,
+      xp: order.xp,
+      daily: daily,
+      lines: lines,
+      deliverable: lines.every(function (line) { return line.enough; }),
+    };
+  }
+
   function attrOf(el) {
     for (var i = 0; i < ACTION_ATTRS.length; i += 1) {
       if (el.hasAttribute(ACTION_ATTRS[i])) return ACTION_ATTRS[i];
@@ -1090,6 +1343,29 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
 
     if (attr === 'data-close-machine') {
       activeInstance.machineDetail = null;
+      return;
+    }
+
+    if (attr === 'data-close-away') {
+      activeInstance.awayReport = null;
+      return;
+    }
+
+    if (attr === 'data-open-settings') {
+      activeInstance.settingsOpen = true;
+      return;
+    }
+
+    if (attr === 'data-close-settings') {
+      activeInstance.settingsOpen = false;
+      return;
+    }
+
+    if (attr === 'data-toggle-sound') {
+      soundEnabled = !soundEnabled;
+      activeInstance.soundOn = soundEnabled;
+      try { localStorage.setItem(SOUND_KEY, soundEnabled ? '1' : '0'); } catch (e) {}
+      if (soundEnabled) beep(660, 0.1, 'triangle', 0.05);
       return;
     }
 
@@ -1266,7 +1542,28 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
     }
 
     if (!result) return;
+
+    if (!result.ok) {
+      SOUNDS.error();
+    } else if (attr === 'data-harvest' || attr === 'data-harvest-all' || attr === 'data-collect' || attr === 'data-collect-all-animal' || attr === 'data-collect-animal' || attr === 'data-collect-machine') {
+      SOUNDS.harvest();
+    } else if (attr === 'data-deliver') {
+      SOUNDS.deliver();
+    } else if (attr === 'data-sell') {
+      SOUNDS.coin();
+    }
+
     activeInstance.addLog(result.ok ? text : failText(result));
+    if (result.unlocked) {
+      result.unlocked.forEach(function (deed) {
+        activeInstance.addLog('成就解锁：' + deed.name + '  +' + (deed.reward || 0) + ' 金币');
+      });
+    }
+    if (result.tasks) {
+      result.tasks.forEach(function (task) {
+        activeInstance.addLog('任务完成：' + task.title + '  +' + task.reward + ' 金币');
+      });
+    }
   }
 
   document.addEventListener('click', function (ev) {

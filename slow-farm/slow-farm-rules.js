@@ -152,24 +152,60 @@ const ANIMALS = {
   },
 };
 
+// 成就：metric 是取值的口径，goal 是门槛
+const ACHIEVEMENTS = [
+  { id: 'firstHarvest', name: '第一把麦子', desc: '收获 1 个作物', metric: 'harvested', goal: 1 , reward: 30 },
+  { id: 'harvest100', name: '百穗', desc: '累计收获 100 个作物', metric: 'harvested', goal: 100 , reward: 300 },
+  { id: 'harvest1000', name: '千仓', desc: '累计收获 1000 个作物', metric: 'harvested', goal: 1000 , reward: 3000 },
+  { id: 'firstOrder', name: '首单', desc: '交付第一张订单', metric: 'delivered', goal: 1 , reward: 100 },
+  { id: 'order50', name: '熟客', desc: '累计交付 50 张订单', metric: 'delivered', goal: 50 , reward: 2000 },
+  { id: 'craft100', name: '作坊', desc: '累计取出 100 件加工品', metric: 'crafted', goal: 100 , reward: 500 },
+  { id: 'animal10', name: '六畜兴旺', desc: '累计收获 10 份动物产出', metric: 'animalItems', goal: 10 , reward: 500 },
+  { id: 'fullPlots', name: '满园', desc: '开到 12 块地', metric: 'plots', goal: 12 , reward: 800 },
+  { id: 'allMachines', name: '机械之心', desc: '建齐全部机器', metric: 'machines', goal: 9 , reward: 2000 },
+  { id: 'allAnimals', name: '牧场主', desc: '三种动物各养一只', metric: 'animalKinds', goal: 3 , reward: 1000 },
+  { id: 'maxLevel', name: '慢慢来', desc: '升到最高等级', metric: 'level', goal: 10 , reward: 5000 },
+];
+
+// 新手任务链：既做引导，也是一条早期金币来源
+const TASKS = [
+  { id: 'plant1', title: '种下第一棵小麦', hint: '在农场点空地的「种植」', tab: 'farm', reward: 20, check: { metric: 'planted', goal: 1 } },
+  { id: 'harvest1', title: '收下第一茬', hint: '小麦两分钟就熟，回来收', tab: 'farm', reward: 30, check: { metric: 'harvested', goal: 1 } },
+  { id: 'seeSilo', title: '看看仓库', hint: '收成先放进仓库', tab: 'silo', reward: 20, check: { metric: 'visited:silo', goal: 1 } },
+  { id: 'buyHourglass', title: '去商场买一个沙漏', hint: '沙漏能立刻完成一项计时', tab: 'shop', reward: 50, check: { metric: 'hourglasses', goal: 1 } },
+  { id: 'seeMachines', title: '打开机器页', hint: '机器把作物变成值钱的东西', tab: 'machines', reward: 30, check: { metric: 'visited:machines', goal: 1 } },
+  { id: 'unlockFlour', title: '解锁面粉配方', hint: '磨坊里点「解锁」', tab: 'machines', reward: 80, check: { metric: 'recipe:flour', goal: 1 } },
+  { id: 'firstJob', title: '把小麦送进磨坊', hint: '面粉要 2 个小麦', tab: 'machines', reward: 50, check: { metric: 'crafted', goal: 1 } },
+  { id: 'seeOrders', title: '看看订单板', hint: '订单是主要收入', tab: 'orders', reward: 30, check: { metric: 'visited:orders', goal: 1 } },
+  { id: 'firstOrder', title: '交付第一张订单', hint: '备齐货就能交', tab: 'orders', reward: 150, check: { metric: 'delivered', goal: 1 } },
+  { id: 'level2', title: '升到 2 级', hint: '收获和交单都给经验', tab: 'farm', reward: 200, check: { metric: 'level', goal: 2 } },
+  { id: 'buildBakery', title: '建一座面包房', hint: '400 金币，Lv.2 解锁', tab: 'machines', reward: 200, check: { metric: 'machine:bakery', goal: 1 } },
+  { id: 'firstAnimal', title: '养第一只鸡', hint: '鸡舍在养殖页', tab: 'animals', reward: 300, check: { metric: 'animal:chicken', goal: 1 } },
+];
+
 const SELL_RATIO = 0.7;
 
 const START = { coins: 50, gems: 5 };
 
+// Node 与浏览器共用同一份规则对象，避免浏览器端手工拼装漏字段。
+const RULES = {
+  ITEMS,
+  CROPS,
+  MACHINES,
+  RECIPES,
+  QUEUE,
+  LEVELS,
+  PLOTS,
+  SILO,
+  ORDERS,
+  ANIMALS,
+  ACHIEVEMENTS,
+  TASKS,
+  GEMS,
+  SELL_RATIO,
+  START,
+};
+
 if (typeof module !== 'undefined') {
-  module.exports = {
-    ITEMS,
-    CROPS,
-    MACHINES,
-    RECIPES,
-    QUEUE,
-    LEVELS,
-    PLOTS,
-    SILO,
-    ORDERS,
-    ANIMALS,
-    GEMS,
-    SELL_RATIO,
-    START,
-  };
+  module.exports = RULES;
 }

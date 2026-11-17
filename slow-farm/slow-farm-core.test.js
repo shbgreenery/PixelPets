@@ -560,5 +560,106 @@ core.feedAnimal(sheepPen, 'sheep', 0, 0, rules);
 sheepPen.animals.sheep.list[0].readyAt = 100;
 assert.deepStrictEqual(core.collectAnimal(sheepPen, 'sheep', 0, 100, rules), { ok: true, itemId: 'wool' });
 
+// 回归概览：数一数现在有多少东西在等你
+const waiting = core.createState(rules, () => 0);
+waiting.coins = 100;
+waiting.silo = { feed: 5 };
+waiting.xp = 500;
+core.plantAll(waiting, 'wheat', 0, rules);
+waiting.plots[0].readyAt = 0;
+waiting.plots[1].readyAt = 0;
+waiting.coins = 1000;
+assert.strictEqual(core.buyAnimal(waiting, 'chicken', rules).ok, true);
+waiting.animals.chicken.list[0].readyAt = 100;
+waiting.machines.mill.queue.push({ recipeId: 'flour', startedAt: 0, readyAt: 100 });
+let summary = core.waitingSummary(waiting, 1000, rules);
+assert.strictEqual(summary.plots, 2, '两块地熟了');
+assert.strictEqual(summary.machineItems, 1);
+assert.strictEqual(summary.animalItems, 1);
+
+// 可交付的订单也算进去
+waiting.silo.wheat = 999;
+summary = core.waitingSummary(waiting, 1000, rules);
+assert.strictEqual(summary.orders, waiting.orders.length);
+
+// 统计与成就
+const deeds = core.createState(rules, () => 0);
+assert.strictEqual(deeds.stats.harvested, 0);
+assert.deepStrictEqual(core.evaluateAchievements(deeds, rules, 0), [], '一开始什么都没有');
+
+deeds.coins = 100;
+core.plantAll(deeds, 'wheat', 0, rules);
+deeds.plots.forEach(p => { p.readyAt = 0; });
+core.harvestAll(deeds, 100, rules);
+assert.strictEqual(deeds.stats.harvested, 12, '6 块地各收 2 个');
+const firstUnlocked = core.evaluateAchievements(deeds, rules, 100);
+assert.ok(firstUnlocked.some(a => a.id === 'firstHarvest'), '收获后解锁第一把麦子');
+assert.strictEqual(deeds.achievements.firstHarvest, true);
+assert.deepStrictEqual(core.evaluateAchievements(deeds, rules, 200), [], '同一个成就不会重复解锁');
+
+// 交付计入统计
+const courier = core.createState(rules, () => 0);
+courier.orders = [{ id: 'o1', lines: [{ itemId: 'wheat', quantity: 2 }], coins: 10, xp: 1 }];
+courier.silo = { wheat: 5 };
+core.deliverOrder(courier, 'o1', rules, () => 0);
+assert.strictEqual(courier.stats.delivered, 1);
+assert.strictEqual(courier.stats.earned, 10);
+assert.ok(core.evaluateAchievements(courier, rules, 0).some(a => a.id === 'firstOrder'));
+
+// 满园成就看地块数
+const fullYard = core.createState(rules, () => 0);
+fullYard.plots = new Array(12).fill(0).map((_, i) => ({ id: i + 1, cropId: null, plantedAt: 0, readyAt: 0 }));
+assert.ok(core.evaluateAchievements(fullYard, rules, 0).some(a => a.id === 'fullPlots'));
+
+// 每日特供：一天一张、奖励翻倍、交付后当天不再补
+const daily = core.createState(rules, () => 0);
+assert.strictEqual(core.ensureDailyOrder(daily, rules, () => 0, 0), true, '第一次会生成');
+const theDaily = daily.dailyOrder;
+assert.ok(theDaily && theDaily.id.indexOf('d') === 0);
+assert.strictEqual(daily.dailyDay, core.dayKey(0));
+assert.strictEqual(core.ensureDailyOrder(daily, rules, () => 0, 1000), false, '同一天不重复生成');
+assert.strictEqual(daily.dailyOrder, theDaily);
+
+// 第二天换一张
+assert.strictEqual(core.ensureDailyOrder(daily, rules, () => 0, 24 * 60 * 60 * 1000), true);
+assert.notStrictEqual(daily.dailyOrder, theDaily);
+
+// 交付特供单：奖励翻倍写入金币，然后清空
+daily.silo = {};
+theDaily.lines.forEach(function (line) { daily.silo[line.itemId] = line.quantity; });
+const coinsBefore = daily.coins;
+const dailyResult = core.deliverOrder(daily, daily.dailyOrder.id, rules, () => 0);
+assert.strictEqual(dailyResult.ok, true);
+assert.strictEqual(daily.coins - coinsBefore, dailyResult.coins);
+assert.strictEqual(dailyResult.coins % 2, 0, '翻倍后是偶数（基础奖励非零时）');
+assert.strictEqual(daily.dailyOrder, null, '交完当天就没有了');
+
+// 任务链：完成一条才推进下一条
+const quest = core.createState(rules, () => 0);
+assert.strictEqual(quest.taskIndex, 0);
+assert.deepStrictEqual(core.evaluateTasks(quest, rules), [], '什么都没做时没有可领的任务');
+const questCoins = quest.coins;
+core.plant(quest, 0, 'wheat', 0, rules);
+const questDone = core.evaluateTasks(quest, rules);
+assert.strictEqual(questDone.length, 1);
+assert.strictEqual(questDone[0].id, 'plant1');
+assert.strictEqual(quest.coins - questCoins, questDone[0].reward - rules.CROPS.wheat.seedPrice);
+assert.strictEqual(quest.taskIndex, 1, '推进到下一条');
+
+// 切页签能推进对应任务
+const sightsee = core.createState(rules, () => 0);
+sightsee.taskIndex = 2;
+assert.deepStrictEqual(core.visitTab(sightsee, 'silo', rules).map(function (t) { return t.id; }), ['seeSilo']);
+assert.strictEqual(sightsee.tabsSeen.silo, true);
+assert.deepStrictEqual(core.visitTab(sightsee, 'silo', rules), [], '重复访问不重复推进');
+
+// 成就达成给金币
+const rewarded = core.createState(rules, () => 0);
+rewarded.xp = 99999;
+const rewardCoins = rewarded.coins;
+const gainedDeeds = core.evaluateAchievements(rewarded, rules);
+assert.ok(gainedDeeds.some(function (d) { return d.id === 'maxLevel'; }));
+assert.strictEqual(rewarded.coins - rewardCoins, 5000, '满级成就给 5000');
+
 console.log('slow-farm-animal 通过');
 console.log('slow-farm-hydrate-orders 通过');

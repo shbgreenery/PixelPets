@@ -291,6 +291,13 @@ function createState(rules, rng) {
     orderSlots: rules.ORDERS.initialSlots,
     orderSeq: 0,
     ordersGenerated: 0,
+    lastSeenAt: 0,
+    dailyDay: '',
+    dailyOrder: null,
+    stats: { planted: 0, harvested: 0, crafted: 0, animalItems: 0, delivered: 0, earned: 0 },
+    achievements: {},
+    taskIndex: 0,
+    tabsSeen: {},
   };
   for (let i = 0; i < state.orderSlots; i += 1) {
     state.orders.push(generateOrder(state, rules, rng));
@@ -390,6 +397,32 @@ function hydrate(state, rules, rng) {
   target.hourglasses = toCount(target.hourglasses);
   target.orderSeq = toCount(target.orderSeq);
   target.ordersGenerated = toCount(target.ordersGenerated);
+  target.lastSeenAt = toCount(target.lastSeenAt);
+  target.dailyDay = typeof target.dailyDay === 'string' ? target.dailyDay : '';
+  target.dailyOrder = normalizeOrder(target.dailyOrder, rules);
+
+  const savedStats = target.stats && typeof target.stats === 'object' ? target.stats : {};
+  target.stats = {
+    planted: toCount(savedStats.planted),
+    harvested: toCount(savedStats.harvested),
+    crafted: toCount(savedStats.crafted),
+    animalItems: toCount(savedStats.animalItems),
+    delivered: toCount(savedStats.delivered),
+    earned: toCount(savedStats.earned),
+  };
+
+  const achievements = {};
+  for (const id of Object.keys(target.achievements || {})) {
+    if (target.achievements[id]) achievements[id] = true;
+  }
+  target.achievements = achievements;
+
+  target.taskIndex = Math.min(toCount(target.taskIndex), rules.TASKS.length);
+  const tabsSeen = {};
+  for (const tab of Object.keys(target.tabsSeen || {})) {
+    if (target.tabsSeen[tab]) tabsSeen[tab] = true;
+  }
+  target.tabsSeen = tabsSeen;
 
   const savedOrders = Array.isArray(target.orders) ? target.orders : [];
   const orders = [];
@@ -512,6 +545,7 @@ function plant(state, plotIndex, cropId, nowMs, rules) {
   if (state.coins < crop.seedPrice) return { ok: false, reason: 'no_coins' };
 
   state.coins -= crop.seedPrice;
+  state.stats.planted += 1;
   plot.cropId = cropId;
   plot.plantedAt = nowMs;
   plot.readyAt = nowMs + crop.growMs;
@@ -532,6 +566,7 @@ function harvest(state, plotIndex, nowMs, rules) {
 
   state.silo[itemId] = (state.silo[itemId] || 0) + qty;
   state.xp += 1;
+  state.stats.harvested += qty;
   plot.cropId = null;
   plot.plantedAt = 0;
   plot.readyAt = 0;
@@ -627,6 +662,7 @@ function collectReady(state, machineId, nowMs, rules) {
     for (const [itemId, quantity] of Object.entries(recipe.output)) {
       state.silo[itemId] = (state.silo[itemId] || 0) + quantity;
       items[itemId] = (items[itemId] || 0) + quantity;
+      state.stats.crafted += quantity;
     }
     collected += 1;
   }
@@ -714,6 +750,24 @@ function abandonOrder(state, orderId, rules, rng) {
 }
 
 function deliverOrder(state, orderId, rules, rng) {
+  if (state.dailyOrder && state.dailyOrder.id === orderId) {
+    const daily = state.dailyOrder;
+    const needed = {};
+    for (const line of daily.lines) needed[line.itemId] = (needed[line.itemId] || 0) + line.quantity;
+    for (const [itemId, quantity] of Object.entries(needed)) {
+      if (!((state.silo[itemId] || 0) >= quantity)) return { ok: false, reason: 'missing_items' };
+    }
+    for (const [itemId, quantity] of Object.entries(needed)) {
+      state.silo[itemId] -= quantity;
+    }
+    state.dailyOrder = null;
+    state.coins += daily.coins;
+    state.xp += daily.xp;
+    state.stats.delivered += 1;
+    state.stats.earned += daily.coins;
+    return { ok: true, coins: daily.coins, xp: daily.xp, daily: true };
+  }
+
   const index = state.orders.findIndex((order) => order.id === orderId);
   if (index < 0) return { ok: false, reason: 'unknown_order' };
   const order = state.orders[index];
@@ -734,6 +788,8 @@ function deliverOrder(state, orderId, rules, rng) {
   state.orders.push(generateOrder(state, rules, rng));
   state.coins += order.coins;
   state.xp += order.xp;
+  state.stats.delivered += 1;
+  state.stats.earned += order.coins;
   return { ok: true, coins: order.coins, xp: order.xp };
 }
 
@@ -789,7 +845,129 @@ function sellItem(state, itemId, quantity, rules) {
   const coins = Math.floor((item.sellPrice * quantity * ratioPercent) / 100);
   state.silo[itemId] -= quantity;
   state.coins += coins;
+  state.stats.earned += coins;
   return { ok: true, coins };
+}
+
+// 回归概览：现在有多少东西在等你处理
+function metricValue(state, metric, rules) {
+  if (metric === 'plots') return state.plots.length;
+  if (metric === 'machines') {
+    return Object.values(state.machines).filter(function (m) { return m.unlocked; }).length;
+  }
+  if (metric === 'animalKinds') {
+    return Object.values(state.animals).filter(function (group) { return group.list.length > 0; }).length;
+  }
+  if (metric === 'level') return levelOf(state.xp, rules);
+  return state.stats[metric] || 0;
+}
+
+function dayKey(nowMs) {
+  const date = new Date(nowMs);
+  return date.getFullYear() + '-' + (date.getMonth() + 1) + '-' + date.getDate();
+}
+
+// 每天一张特供单：奖励翻倍，交完当天不再出现
+function ensureDailyOrder(state, rules, rng, nowMs) {
+  const key = dayKey(nowMs);
+  if (state.dailyDay === key && state.dailyOrder) return false;
+
+  const base = generateOrder(state, rules, rng);
+  state.dailyDay = key;
+  state.dailyOrder = {
+    id: 'd' + base.id.slice(1),
+    lines: base.lines,
+    coins: base.coins * 2,
+    xp: base.xp * 2,
+  };
+  return true;
+}
+
+function taskMetric(state, metric, rules) {
+  if (metric === 'level') return levelOf(state.xp, rules);
+  if (metric === 'hourglasses') return state.hourglasses;
+  if (metric.indexOf('visited:') === 0) {
+    return state.tabsSeen[metric.slice(8)] ? 1 : 0;
+  }
+  if (metric.indexOf('recipe:') === 0) {
+    return state.unlockedRecipes[metric.slice(7)] ? 1 : 0;
+  }
+  if (metric.indexOf('machine:') === 0) {
+    const machine = state.machines[metric.slice(8)];
+    return machine && machine.unlocked ? 1 : 0;
+  }
+  if (metric.indexOf('animal:') === 0) {
+    const group = state.animals[metric.slice(7)];
+    return group ? group.list.length : 0;
+  }
+  return state.stats[metric] || 0;
+}
+
+// 任务链是线性的：当前这条没完成，后面的不推进
+function evaluateTasks(state, rules) {
+  const done = [];
+  while (state.taskIndex < rules.TASKS.length) {
+    const task = rules.TASKS[state.taskIndex];
+    if (taskMetric(state, task.check.metric, rules) < task.check.goal) break;
+    state.taskIndex += 1;
+    state.coins += task.reward;
+    state.stats.earned += task.reward;
+    done.push(task);
+  }
+  return done;
+}
+
+function visitTab(state, tab, rules) {
+  if (state.tabsSeen[tab]) return [];
+  state.tabsSeen[tab] = true;
+  return evaluateTasks(state, rules);
+}
+
+function evaluateAchievements(state, rules) {
+  const unlocked = [];
+  for (const def of rules.ACHIEVEMENTS) {
+    if (state.achievements[def.id]) continue;
+    if (metricValue(state, def.metric, rules) >= def.goal) {
+      state.achievements[def.id] = true;
+      if (def.reward) {
+        state.coins += def.reward;
+        state.stats.earned += def.reward;
+      }
+      unlocked.push(def);
+    }
+  }
+  return unlocked;
+}
+
+function waitingSummary(state, nowMs, rules) {
+  let plots = 0;
+  for (const plot of state.plots) {
+    if (plot.cropId && plot.readyAt <= nowMs) plots += 1;
+  }
+
+  let machineItems = 0;
+  for (const id of Object.keys(state.machines)) {
+    for (const job of state.machines[id].queue) {
+      if (job.readyAt <= nowMs) machineItems += 1;
+    }
+  }
+
+  let animalItems = 0;
+  for (const kind of Object.keys(state.animals)) {
+    for (const animal of state.animals[kind].list) {
+      if (animal.readyAt > 0 && animal.readyAt <= nowMs) animalItems += 1;
+    }
+  }
+
+  let orders = 0;
+  for (const order of state.orders) {
+    const ready = order.lines.every(function (line) {
+      return (state.silo[line.itemId] || 0) >= line.quantity;
+    });
+    if (ready) orders += 1;
+  }
+
+  return { plots, machineItems, animalItems, orders };
 }
 
 function buyAnimal(state, kind, rules) {
@@ -832,6 +1010,7 @@ function collectAnimal(state, kind, index, nowMs, rules) {
   if (!canStore(state, addition, rules)) return { ok: false, reason: 'silo_full' };
 
   state.silo[def.product] = (state.silo[def.product] || 0) + 1;
+  state.stats.animalItems += 1;
   animal.readyAt = 0;
   return { ok: true, itemId: def.product };
 }
@@ -1014,46 +1193,56 @@ function useHourglassOnPlots(state, nowMs, rules) {
   return { ok: true, used, stopped };
 }
 
+const CORE = {
+  validateContent,
+  createState,
+  hydrate,
+  levelOf,
+  siloCap,
+  siloSlotsUsed,
+  siloSlotsFree,
+  canStore,
+  remainingMs,
+  formatDuration,
+  plant,
+  harvest,
+  unlockRecipe,
+  buyQueueSlot,
+  queueSlotCost,
+  enqueue,
+  collectReady,
+  generateOrder,
+  deliverOrder,
+  abandonOrder,
+  buyOrderSlot,
+  orderSlotCost,
+  buyPlot,
+  buyMachine,
+  buySiloSlot,
+  sellItem,
+  waitingSummary,
+  dayKey,
+  ensureDailyOrder,
+  evaluateAchievements,
+  evaluateTasks,
+  taskMetric,
+  visitTab,
+  metricValue,
+  buyAnimal,
+  feedAnimal,
+  collectAnimal,
+  feedAll,
+  collectAll,
+  buyStableSlot,
+  buyHourglass,
+  useHourglass,
+  grantAdGems,
+  grantPaidGems,
+  plantAll,
+  harvestAll,
+  useHourglassOnPlots,
+};
+
 if (typeof module !== 'undefined') {
-  module.exports = {
-    validateContent,
-    createState,
-    hydrate,
-    levelOf,
-    siloCap,
-    siloSlotsUsed,
-    siloSlotsFree,
-    canStore,
-    remainingMs,
-    formatDuration,
-    plant,
-    harvest,
-    unlockRecipe,
-    buyQueueSlot,
-    queueSlotCost,
-    enqueue,
-    collectReady,
-    generateOrder,
-    deliverOrder,
-    abandonOrder,
-    buyOrderSlot,
-    orderSlotCost,
-    buyPlot,
-    buyMachine,
-    buySiloSlot,
-    sellItem,
-    buyAnimal,
-    feedAnimal,
-    collectAnimal,
-    feedAll,
-    collectAll,
-    buyStableSlot,
-    buyHourglass,
-    useHourglass,
-    grantAdGems,
-    grantPaidGems,
-    plantAll,
-    harvestAll,
-    useHourglassOnPlots,
-  };
+  module.exports = CORE;
 }

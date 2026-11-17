@@ -37,7 +37,12 @@ function memoryAdapter() {
   assert.strictEqual(state.plots[0].readyAt, 2 * 60 * 1000);
   clock = 2 * 60 * 1000;
   const picked = await app.harvest(0);
-  assert.deepStrictEqual(picked, { ok: true, itemId: 'wheat', qty: 2 });
+  assert.strictEqual(picked.ok, true);
+  assert.strictEqual(picked.itemId, 'wheat');
+  assert.strictEqual(picked.qty, 2);
+  assert.ok(Array.isArray(picked.unlocked) && picked.unlocked.some(function (deed) {
+    return deed.id === 'firstHarvest';
+  }), '首次收获会解锁成就');
 
   // 广告走适配器，返回钻石
   const ad = await app.watchAd();
@@ -62,6 +67,17 @@ function memoryAdapter() {
 
   // reason 都有人话
   assert.strictEqual(typeof require('./slow-farm-app.js').reasons.no_coins, 'string');
+
+  // 回归时长：读档时算出离开了多久
+  const awayAdapter = memoryAdapter();
+  const awayStore = createStore(awayAdapter);
+  let awayClock = 1000;
+  const awayApp = createApp({ rules, store: awayStore, now: () => awayClock, rng: () => 0 });
+  await awayApp.start();
+  awayClock = 1000 + 2 * 60 * 60 * 1000;
+  const awayApp2 = createApp({ rules, store: awayStore, now: () => awayClock, rng: () => 0 });
+  const restarted = await awayApp2.start();
+  assert.strictEqual(restarted.awayMs, 2 * 60 * 60 * 1000, '两小时');
 
   console.log('slow-farm-app 通过');
 })();

@@ -3,38 +3,7 @@
 // 用例层：读档与动作编排。不碰 DOM。
 // 本层没有 tick：所有计时靠绝对时间戳，状态不会自己变化。
 
-const core = typeof require !== 'undefined'
-  ? require('./slow-farm-core.js')
-  : {
-      createState,
-      hydrate,
-      plant,
-      harvest,
-      plantAll,
-      harvestAll,
-      enqueue,
-      collectReady,
-      unlockRecipe,
-      buyQueueSlot,
-      deliverOrder,
-      abandonOrder,
-      buyOrderSlot,
-      buyPlot,
-      buyMachine,
-      buySiloSlot,
-      sellItem,
-      buyAnimal,
-      feedAnimal,
-      collectAnimal,
-      feedAll,
-      collectAll,
-      buyStableSlot,
-      buyHourglass,
-      useHourglass,
-      useHourglassOnPlots,
-      grantAdGems,
-      grantPaidGems,
-    };
+const core = typeof require !== 'undefined' ? require('./slow-farm-core.js') : CORE;
 
 // 本地模式下的广告实现：点击即成功。将来接真实激励视频只替换这里。
 const instantAdProvider = {
@@ -81,20 +50,30 @@ function createApp({ rules, store, now, rng = Math.random, adProvider = instantA
   let state = null;
 
   async function persist() {
-    if (state) await store.save(state);
+    if (!state) return;
+    state.lastSeenAt = now();
+    await store.save(state);
   }
 
   async function start() {
     const loaded = await store.load();
+    const awayMs = loaded && loaded.lastSeenAt ? Math.max(0, now() - loaded.lastSeenAt) : 0;
     state = wrapState(loaded ? core.hydrate(loaded, rules, rng) : core.createState(rules, rng));
+    core.ensureDailyOrder(state, rules, rng, now());
     await persist();
-    return { state };
+    return { state, awayMs };
   }
 
   async function run(action) {
     if (!state) return { ok: false, reason: 'no_state' };
     const result = action();
-    if (result.ok) await persist();
+    if (result.ok) {
+      const unlocked = core.evaluateAchievements(state, rules);
+      const tasks = core.evaluateTasks(state, rules);
+      if (unlocked.length > 0) result.unlocked = unlocked;
+      if (tasks.length > 0) result.tasks = tasks;
+      await persist();
+    }
     return result;
   }
 
@@ -102,9 +81,18 @@ function createApp({ rules, store, now, rng = Math.random, adProvider = instantA
     return state;
   }
 
+  async function visitTab(tab) {
+    if (!state) return { ok: false, reason: 'no_state' };
+    const tasks = core.visitTab(state, tab, rules);
+    const unlocked = core.evaluateAchievements(state, rules);
+    if (tasks.length > 0 || unlocked.length > 0) await persist();
+    return { ok: true, tasks, unlocked };
+  }
+
   return {
     start,
     getState: current,
+    visitTab,
     save: persist,
 
     plant: (plotIndex, cropId) => run(() => core.plant(state, plotIndex, cropId, now(), rules)),
