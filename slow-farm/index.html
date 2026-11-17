@@ -749,7 +749,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
             coins: String(s.coins),
             gems: String(s.gems),
             level: String(levelOf(s.xp, rules)),
-            siloText: siloSlotsUsed(s, rules) + '/' + siloCap(s) + ' 格',
+            siloText: siloSlotsUsed(s) + '/' + siloCap(s) + ' 格',
           };
         },
 
@@ -1067,8 +1067,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
               id: itemId,
               name: item.name,
               quantity: count,
-              kindName: (item.category === 'crop' ? '作物' : '成品')
-                + (count > SILO.perSlot ? ' · ' + Math.ceil(count / SILO.perSlot) + ' 格' : ''),
+              kindName: item.category === 'crop' ? '作物' : '成品',
               sellable: true,
             });
           });

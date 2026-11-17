@@ -79,5 +79,23 @@ function memoryAdapter() {
   const restarted = await awayApp2.start();
   assert.strictEqual(restarted.awayMs, 2 * 60 * 60 * 1000, '两小时');
 
+  // 特供单交完后，当天重开页面不该再补一张
+  const dailyAdapter = memoryAdapter();
+  const dailyStore = createStore(dailyAdapter);
+  let dailyClock = 1000;
+  const dailyApp = createApp({ rules, store: dailyStore, now: () => dailyClock, rng: () => 0 });
+  const first = await dailyApp.start();
+  const dailyOrder = first.state.dailyOrder;
+  assert.ok(dailyOrder, '当天应有一张特供单');
+  dailyOrder.lines.forEach(function (line) { first.state.silo[line.itemId] = line.quantity; });
+  const delivered = await dailyApp.deliverOrder(dailyOrder.id);
+  assert.strictEqual(delivered.ok, true);
+  assert.strictEqual(dailyApp.getState().dailyOrder, null);
+
+  dailyClock += 60 * 1000;
+  const dailyApp2 = createApp({ rules, store: dailyStore, now: () => dailyClock, rng: () => 0 });
+  const reopened = await dailyApp2.start();
+  assert.strictEqual(reopened.state.dailyOrder, null, '交完当天重开不再补单');
+
   console.log('slow-farm-app 通过');
 })();

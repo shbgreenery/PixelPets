@@ -192,9 +192,6 @@ function validateGems(gems) {
 }
 
 function validateSilo(silo) {
-  if (!Number.isInteger(silo.perSlot) || silo.perSlot < 1) {
-    throw new Error('每格容量错误');
-  }
   if (!Number.isInteger(silo.initial) || silo.initial < 1) {
     throw new Error('初始格子数错误');
   }
@@ -318,38 +315,34 @@ function siloCap(state) {
   return state.siloSlots;
 }
 
-function slotsFor(quantity, rules) {
-  if (!(quantity > 0)) return 0;
-  return Math.ceil(quantity / rules.SILO.perSlot);
-}
-
-function siloSlotsUsed(state, rules) {
+// 一个格子只放一种物品，数量不设上限
+function siloSlotsUsed(state) {
   let total = 0;
-  for (const quantity of Object.values(state.silo)) total += slotsFor(quantity, rules);
+  for (const quantity of Object.values(state.silo)) {
+    if (quantity > 0) total += 1;
+  }
   return total;
 }
 
-function projectedSlots(state, additions, rules) {
+function projectedSlots(state, additions) {
   let total = 0;
-  const seen = {};
 
   for (const [itemId, quantity] of Object.entries(state.silo)) {
-    total += slotsFor(quantity + (additions[itemId] || 0), rules);
-    seen[itemId] = true;
+    if (quantity + (additions[itemId] || 0) > 0) total += 1;
   }
   for (const [itemId, quantity] of Object.entries(additions)) {
-    if (!seen[itemId]) total += slotsFor(quantity, rules);
+    if (!Object.prototype.hasOwnProperty.call(state.silo, itemId) && quantity > 0) total += 1;
   }
 
   return total;
 }
 
-function canStore(state, additions, rules) {
-  return projectedSlots(state, additions, rules) <= state.siloSlots;
+function canStore(state, additions) {
+  return projectedSlots(state, additions) <= state.siloSlots;
 }
 
-function siloSlotsFree(state, rules) {
-  return Math.max(0, state.siloSlots - siloSlotsUsed(state, rules));
+function siloSlotsFree(state) {
+  return Math.max(0, state.siloSlots - siloSlotsUsed(state));
 }
 
 function remainingMs(readyAt, nowMs) {
@@ -562,7 +555,7 @@ function harvest(state, plotIndex, nowMs, rules) {
   const qty = rules.CROPS[itemId].yield;
   const addition = {};
   addition[itemId] = qty;
-  if (!canStore(state, addition, rules)) return { ok: false, reason: 'silo_full' };
+  if (!canStore(state, addition)) return { ok: false, reason: 'silo_full' };
 
   state.silo[itemId] = (state.silo[itemId] || 0) + qty;
   state.xp += 1;
@@ -654,7 +647,7 @@ function collectReady(state, machineId, nowMs, rules) {
       continue;
     }
     const recipe = rules.RECIPES[job.recipeId];
-    if (!canStore(state, recipe.output, rules)) {
+    if (!canStore(state, recipe.output)) {
       remaining.push(job);
       skipped += 1;
       continue;
@@ -868,9 +861,10 @@ function dayKey(nowMs) {
 }
 
 // 每天一张特供单：奖励翻倍，交完当天不再出现
+// dailyDay 记录「今天已经发放过」，交付清空 dailyOrder 后日期仍保留，避免当天重开又补一张
 function ensureDailyOrder(state, rules, rng, nowMs) {
   const key = dayKey(nowMs);
-  if (state.dailyDay === key && state.dailyOrder) return false;
+  if (state.dailyDay === key) return false;
 
   const base = generateOrder(state, rules, rng);
   state.dailyDay = key;
@@ -1007,7 +1001,7 @@ function collectAnimal(state, kind, index, nowMs, rules) {
 
   const addition = {};
   addition[def.product] = 1;
-  if (!canStore(state, addition, rules)) return { ok: false, reason: 'silo_full' };
+  if (!canStore(state, addition)) return { ok: false, reason: 'silo_full' };
 
   state.silo[def.product] = (state.silo[def.product] || 0) + 1;
   state.stats.animalItems += 1;

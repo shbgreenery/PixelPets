@@ -42,16 +42,15 @@ assert.strictEqual(core.levelOf(40, rules), 2);
 assert.strictEqual(core.levelOf(1000, rules), 6);
 assert.strictEqual(core.levelOf(999999, rules), rules.LEVELS.length, '超过封顶取最高级');
 
-// 仓库：格子制，一格一种物品、每种最多 99 个
+// 仓库：格子制，一格一种物品、数量不设上限，默认 30 格
+assert.strictEqual(rules.SILO.initial, 30, '默认仓库 30 格');
 assert.strictEqual(core.siloCap(s), rules.SILO.initial);
-assert.strictEqual(core.siloSlotsUsed(s, rules), 0);
-assert.strictEqual(core.siloSlotsFree(s, rules), rules.SILO.initial);
+assert.strictEqual(core.siloSlotsUsed(s), 0);
+assert.strictEqual(core.siloSlotsFree(s), rules.SILO.initial);
 s.silo = { wheat: 4, bread: 2 };
-assert.strictEqual(core.siloSlotsUsed(s, rules), 2, '两种物品占两格');
-s.silo = { wheat: 99 };
-assert.strictEqual(core.siloSlotsUsed(s, rules), 1, '99 个刚好一格');
+assert.strictEqual(core.siloSlotsUsed(s), 2, '两种物品占两格');
 s.silo = { wheat: 179 };
-assert.strictEqual(core.siloSlotsUsed(s, rules), 2, '179 个溢到第二格');
+assert.strictEqual(core.siloSlotsUsed(s), 1, '同一种物品数量再多也只占一格');
 
 // 时间工具：时钟回拨时剩余时间钳到 0
 assert.strictEqual(core.remainingMs(5000, 1000), 4000);
@@ -118,7 +117,7 @@ assert.strictEqual(farm.silo.wheat, 2);
 assert.strictEqual(farm.xp, 1);
 assert.strictEqual(farm.plots[0].cropId, null);
 
-// 仓库格满的边界：一格已放满 99 个玉米，再收小麦要开新格，但只有一格
+// 仓库格满的边界：一格已被玉米占住，再收小麦是另一种物品，需要新格
 const tight = core.createState(rules, () => 0);
 tight.siloSlots = 1;
 tight.coins = 100;
@@ -129,13 +128,14 @@ r = core.harvest(tight, 0, 2 * 60 * 1000, rules);
 assert.strictEqual(r.reason, 'silo_full', '没有空格不能放新物品');
 assert.strictEqual(tight.plots[0].cropId, 'wheat', '被拒时作物留在地里');
 
-// 同一种物品还能叠进已有的格子，叠满 99 之后才需要新格
+// 同一种物品一直叠在原来的格子里，数量不受上限
 tight.silo = { wheat: 96 };
 r = core.harvest(tight, 0, 2 * 60 * 1000, rules);
-assert.strictEqual(r.ok, true, '96 + 2 还在同一格里');
+assert.strictEqual(r.ok, true, '同种物品仍占一格');
 assert.strictEqual(tight.silo.wheat, 98);
 r = core.harvest(tight, 1, 2 * 60 * 1000, rules);
-assert.strictEqual(r.reason, 'silo_full', '98 + 2 要溢到第二格，但没有');
+assert.strictEqual(r.ok, true, '再收一份也不占新格');
+assert.strictEqual(tight.silo.wheat, 100);
 
 console.log('slow-farm-plant 通过');
 
@@ -203,7 +203,7 @@ packed.xp = 40;
 packed.machines.bakery.unlocked = true;
 core.unlockRecipe(packed, 'bread', rules);
 assert.strictEqual(core.enqueue(packed, 'bakery', 'bread', 0, rules).ok, true);
-packed.silo = { bread: 99, corn: 99 };
+packed.silo = { corn: 99, wheat: 99 };
 c = core.collectReady(packed, 'bakery', 30 * 60 * 1000, rules);
 assert.strictEqual(c.skipped, 1);
 assert.strictEqual(packed.machines.bakery.queue.length, 1, '收不下就留在队列里');
@@ -413,17 +413,17 @@ assert.strictEqual(h.skipped, 0);
 assert.strictEqual(bulkHarvest.plots[0].cropId, null);
 assert.strictEqual(bulkHarvest.plots[2].cropId, 'wheat', '没成熟的留着');
 
-// 仓库格满时部分收获，能叠进原格的先收
+// 仓库格满时，新种类的物品收不进去
 const packed2 = core.createState(rules, () => 0);
 packed2.siloSlots = 2;
 packed2.coins = 4;
 core.plantAll(packed2, 'wheat', 0, rules);
 packed2.plots.forEach(p => { p.readyAt = 100; });
-packed2.silo = { wheat: 96, corn: 99 };
+packed2.silo = { corn: 99, flour: 99 };
 h = core.harvestAll(packed2, 100, rules);
-assert.deepStrictEqual(h.items, { wheat: 2 }, '两个还能叠进原格');
-assert.strictEqual(h.skipped, 3, '再往后都要开新格，但没有');
-assert.strictEqual(core.siloSlotsUsed(packed2, rules), 2);
+assert.deepStrictEqual(h.items, {}, '小麦是新种类，没有空格');
+assert.strictEqual(h.skipped, 4, '四块都要开新格，但没有');
+assert.strictEqual(core.siloSlotsUsed(packed2), 2);
 
 // 一键加速：每块进行中的地消耗一个沙漏，机器不受影响
 const rushAll = core.createState(rules, () => 0);
@@ -633,6 +633,11 @@ assert.strictEqual(dailyResult.ok, true);
 assert.strictEqual(daily.coins - coinsBefore, dailyResult.coins);
 assert.strictEqual(dailyResult.coins % 2, 0, '翻倍后是偶数（基础奖励非零时）');
 assert.strictEqual(daily.dailyOrder, null, '交完当天就没有了');
+
+// 交完之后当天再进游戏（重新 start）不该补一张新的
+const day2Ms = 24 * 60 * 60 * 1000;
+assert.strictEqual(core.ensureDailyOrder(daily, rules, () => 0, day2Ms + 60000), false, '交完当天不再补');
+assert.strictEqual(daily.dailyOrder, null, '交完当天保持为空');
 
 // 任务链：完成一条才推进下一条
 const quest = core.createState(rules, () => 0);
