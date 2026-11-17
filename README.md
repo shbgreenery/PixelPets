@@ -15,6 +15,7 @@
 | [2D 连连看](link2d.html) | Phaser 4 | 8x8/12x12/16x16 三种尺寸，≤2 拐点连线消除，消除后按随机物效方向沉底重排 |
 | [沙画](sand-painting.html) | Phaser 4 | 程序生成插画转 11 色沙画，盘子沿传送带循环，同色沙粒从底部十行被吸走。支持加盘位、三档倍速、自动加速 |
 | [麦田工坊](farm/index.html) | 纯 DOM | 卡片式经营：点端口取放货物，雇工人按节拍自动搬运，升级机器与土地，离线也产金币 |
+| [慢慢农场](slow-farm/index.html) | 纯 DOM + Alpine | 真实时间种田：种作物、开机器、交订单，离开一会儿回来收成照长 |
 
 ## 项目结构
 
@@ -42,6 +43,14 @@ farm/index.html         # 麦田工坊卡片界面
 farm/farm-core.test.js  # 麦田工坊领域层单元测试
 farm/farm-store.test.js # 麦田工坊存档层单元测试
 farm/farm-app.test.js   # 麦田工坊用例层单元测试
+slow-farm/slow-farm-rules.js      # 慢慢农场内容数据：物品、作物、机器、配方、订单、等级
+slow-farm/slow-farm-core.js       # 慢慢农场领域层：种植、加工、订单、购买、加速
+slow-farm/slow-farm-store.js      # 慢慢农场存档接口与本地实现
+slow-farm/slow-farm-app.js        # 慢慢农场用例层：读档与动作编排
+slow-farm/index.html              # 慢慢农场界面
+slow-farm/slow-farm-core.test.js  # 慢慢农场领域层单元测试
+slow-farm/slow-farm-store.test.js # 慢慢农场存档层单元测试
+slow-farm/slow-farm-app.test.js   # 慢慢农场用例层单元测试
 ```
 
 核心算法与渲染分离 -- `bfs.js`、`link-core.js`、`link2d-core.js`、`sand-core.js`、`farm/farm-core.js`、`farm/farm-app.js` 是纯逻辑模块，不依赖任何游戏引擎或 DOM，可独立测试。
@@ -71,6 +80,9 @@ node sand-core.test.js
 node farm/farm-core.test.js
 node farm/farm-store.test.js
 node farm/farm-app.test.js
+node slow-farm/slow-farm-core.test.js
+node slow-farm/slow-farm-store.test.js
+node slow-farm/slow-farm-app.test.js
 ```
 
 ## 技术选型
@@ -80,4 +92,5 @@ node farm/farm-app.test.js
 - **Phaser 3** -- 快递哪去了，成熟的 2D 游戏框架
 - **Three.js** -- 3D 连连看，体素立方体的 3D 渲染与交互
 - **纯 DOM** -- 消消乐，零依赖，CSS 动画驱动
+- **纯 DOM + Alpine** -- 麦田工坊与慢慢农场，本地 vendor 引入，状态驱动渲染；慢慢农场的计时只存绝对时间戳，所以没有离线结算函数
 - 所有依赖通过 CDN 引入，无 npm、无打包工具

@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#100D0A">
+  <link rel="icon" href="data:,">
+  <title>慢慢农场</title>
+  <style>
+:root{
+  --night:#1A1512;--night-top:#2C231B;--night-bottom:#100D0A;
+  --surface:#201A15;--surface-hi:#2C241D;--line:#4A3B2C;
+  --brass:#D9A75C;--amber:#E0A44A;
+  --text:#F5EFE6;--text-dim:#A99C8C;
+  --paper:#F5EFE4;--ink:#2A231D;
+  --success:#7FAE72;
+  --serif:"Songti SC","STSong","Noto Serif CJK SC",serif;
+  --sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --mono:"SFMono-Regular","SF Mono","Menlo",monospace;
+}
+*{box-sizing:border-box}
+[x-cloak]{display:none!important}
+html,body{height:100%}
+body{
+  margin:0;color:var(--text);font-family:var(--sans);
+  background:radial-gradient(circle at 50% 12%,var(--night-top),var(--night) 45%,var(--night-bottom));
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-action:manipulation}
+button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
+
+.frame{
+  position:relative;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) 92px;
+  width:min(430px,100vw);height:min(880px,100dvh);margin:0 auto;overflow:hidden;
+  border:1px solid #d9a75c33;border-radius:16px;background:var(--night);
+  box-shadow:0 30px 80px #000000b8;
+}
+@media (max-height:880px){.frame{border-radius:0;height:100dvh}}
+
+/* 状态条 */
+.hud{display:grid;grid-template-columns:1fr repeat(4,auto);align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #d9a75c26}
+.brand small{display:block;color:var(--text-dim);font:9px var(--mono);letter-spacing:.14em}
+.brand h1{margin:2px 0 0;font:700 19px/1.1 var(--serif);letter-spacing:.08em;white-space:nowrap}
+.stat{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0}
+.stat small{color:var(--text-dim);font-size:9px}
+.stat b{font:700 14px var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.stat b.bump{color:var(--amber)}
+
+/* 页签 */
+.tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;padding:6px 10px}
+.tabs button{height:40px;border:1px solid #4B3828;border-radius:4px;color:var(--text-dim);background:var(--surface);font-size:12px;transition:.2s}
+.tabs button[aria-selected="true"]{color:var(--text);border-color:#d9a75cb8;background:var(--surface-hi)}
+
+/* 面板 */
+.stage{min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.panel{flex:1 1 auto;min-height:0;overflow-y:auto;padding:4px 12px 12px;scrollbar-width:thin}
+.panel h2{margin:6px 0 8px;font:700 15px var(--serif);letter-spacing:.06em;display:flex;align-items:center;gap:8px}
+.panel h2 small{color:var(--text-dim);font:10px var(--sans);letter-spacing:0}
+.btn-sm{min-height:28px;margin-left:auto;padding:0 10px;font-size:11px}
+
+.toolbar{display:flex;gap:6px;margin-bottom:8px}
+.toolbar .btn{flex:1;min-height:38px}
+.seed-list{display:grid;grid-template-columns:1fr;gap:8px;margin-top:14px}
+.seed-choice{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid #C9B9A0;border-radius:6px;color:var(--ink);background:#EFE6D6;font-size:13px;text-align:left}
+.seed-choice b{color:#8A6534;font:11px var(--mono);white-space:nowrap}
+.seed-choice:disabled{opacity:.4;cursor:not-allowed}
+.seed-empty{margin:14px 0 0;color:#7A6855;font-size:12px}
+
+.list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.row{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:var(--surface)}
+.row.ready{border-color:#e0a44aad;background:linear-gradient(100deg,#e0a44a22,transparent),var(--surface);transition:background .3s}
+.row.locked{opacity:.55;border-style:dashed}
+
+/* 地块用两列网格，卡片内部竖排 */
+#plots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+#plots .plot{flex-direction:column;align-items:stretch;gap:6px}
+#plots .plot .btn-group{justify-content:flex-start}
+@media (max-width:380px){#plots{grid-template-columns:1fr}}
+.row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.row-title{display:flex;align-items:baseline;gap:6px;font-size:13px}
+.row-title b{font-weight:600}
+.row-sub{color:var(--text-dim);font-size:11px;font-variant-numeric:tabular-nums}
+.time{color:var(--brass);font:12px var(--mono);font-variant-numeric:tabular-nums}
+.ready-tag{color:var(--amber);font-size:11px}
+
+.btn{min-height:36px;padding:0 11px;border:1px solid #d9a75c66;border-radius:4px;color:var(--brass);font-size:12px;white-space:nowrap}
+.btn.solid{color:var(--ink);border-color:var(--amber);background:var(--amber)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-group{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+
+.chip{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border:1px solid #d9a75c33;border-radius:10px;color:var(--text-dim);font-size:11px}
+.chip b{color:var(--brass);font-family:var(--mono);font-weight:500}
+
+.shop-tabs{display:flex;gap:5px;margin-bottom:8px;flex-wrap:wrap}
+.shop-tab{padding:6px 11px;border:1px solid var(--line);border-radius:14px;color:var(--text-dim);font-size:12px}
+.shop-tab[aria-selected="true"]{color:var(--ink);border-color:var(--amber);background:var(--amber)}
+
+/* 日志 */
+.logbox{border-top:1px solid var(--line);padding:8px 14px;background:#160F0C;overflow:hidden}
+.logbox h3{margin:0 0 4px;color:var(--text-dim);font:10px var(--mono);letter-spacing:.1em}
+.logbox ol{list-style:none;margin:0;padding:0;display:grid;gap:2px;max-height:60px;overflow:hidden}
+.logbox li{display:grid;grid-template-columns:40px 1fr;gap:6px;color:var(--text-dim);font-size:11px;white-space:nowrap;overflow:hidden}
+.logbox li time{color:#7E7164;font-family:var(--mono)}
+.logbox li span{overflow:hidden;text-overflow:ellipsis}
+
+.empty-note{padding:16px;border:1px dashed var(--line);border-radius:5px;color:var(--text-dim);font-size:12px;text-align:center}
+
+/* 仓库网格 */
+.grid-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));align-items:start;gap:6px;list-style:none;margin:0;padding:0}
+.card-item{display:flex;flex-direction:column;gap:3px;padding:9px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+.ci-name{color:var(--text);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ci-qty{color:var(--brass);font:700 18px var(--mono);font-variant-numeric:tabular-nums}
+.ci-tag{color:var(--text-dim);font-size:10px}
+.card-item .btn{min-height:30px;margin-top:4px;padding:0 8px;font-size:11px}
+
+/* 卖出弹窗 */
+.sell-num{margin:12px 0 4px;color:#8A6534;font:700 28px var(--mono)}
+.sell-num span{color:#7A6855;font-size:14px}
+.sell-range{width:100%;margin:8px 0 0;accent-color:var(--amber)}
+.sell-actions{display:flex;gap:8px;margin-top:18px}
+.sell-actions .btn{flex:1;min-height:42px;border-color:#C9B9A0;color:var(--ink);background:#EFE6D6}
+.sell-actions .btn.solid{color:var(--ink);border-color:var(--amber);background:var(--amber)}
+
+/* 机器卡片与详情 */
+.card-item.ready{border-color:#e0a44aad;background:linear-gradient(100deg,#e0a44a22,transparent),var(--surface)}
+.card-item.locked{opacity:.62;border-style:dashed}
+.card-item.working .ci-qty{color:var(--amber)}
+#machines .card-item:not(.locked){cursor:pointer}
+
+.paper.paper-wide{width:min(420px,100%);text-align:left;max-height:86vh;overflow-y:auto}
+.queue-head{display:flex;align-items:center;justify-content:space-between;margin-top:14px;color:#7A6855;font-size:12px}
+.mini-btn{padding:4px 10px;border:1px solid #C9B9A0;border-radius:6px;color:#8A6534;background:#EFE6D6;font-size:12px}
+.queue-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:6px;margin-top:8px}
+.queue-cell{display:flex;flex-direction:column;gap:2px;padding:8px;border:1px solid #D8C9B0;border-radius:6px;background:#EFE6D6;color:#2A231D;text-align:left}
+.queue-cell b{color:#8A6534;font:10px var(--mono)}
+.queue-cell span{font-size:12px}
+.queue-cell em{color:#7A6855;font:11px var(--mono);font-style:normal}
+.queue-cell.empty{opacity:.5;border-style:dashed}
+.queue-cell.ready{border-color:var(--amber);background:#F6E3C4}
+.queue-cell.add{align-items:center;justify-content:center;border-style:dashed;background:transparent;cursor:pointer}
+.queue-cell.add b{color:#8A6534;font:700 18px var(--mono)}
+.collect-all{width:100%;margin-top:8px;min-height:38px;border-color:var(--amber);color:var(--ink);background:var(--amber)}
+.sub-title{margin:16px 0 8px;color:#3A2F25;font:700 13px var(--serif)}
+.recipe-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.recipe{padding:8px 10px;border:1px solid #D8C9B0;border-radius:6px;background:#F3EADB}
+.recipe.locked{opacity:.7;border-style:dashed}
+.recipe-name{color:#2A231D;font-size:13px}
+.recipe-hint{margin-top:4px;color:#7A6855;font-size:11px}
+.recipe-body{margin-top:6px;display:grid;gap:5px}
+.recipe-ing{display:flex;flex-wrap:wrap;gap:10px;color:#3A2F25;font-size:12px}
+.recipe-ing .short{color:#B03A26;font-weight:600}
+.recipe-time{color:#8A6534;font:11px var(--mono)}
+.recipe .btn{min-height:32px;border-color:#C9B9A0;color:#2A231D;background:#EFE6D6}
+
+/* 养殖 */
+.yard{margin-bottom:14px}
+.card-item.animal.growing .ci-qty{color:var(--amber)}
+.card-item.animal.ready{border-color:#e0a44aad;background:linear-gradient(100deg,#e0a44a22,transparent),var(--surface)}
+.card-item.animal.hungry{opacity:.85}
+.card-item.animal-buy{border-style:dashed}
+
+/* 经验条 */
+.xpbar{display:flex;align-items:center;gap:8px;padding:0 14px 8px}
+.xp-track{flex:1;height:4px;overflow:hidden;border-radius:2px;background:#0D0B09}
+.xp-fill{height:100%;background:linear-gradient(90deg,#796039,var(--amber));transition:width .3s}
+.xpbar span{color:var(--text-dim);font:10px var(--mono);white-space:nowrap}
+
+/* 订单卡片 */
+#orders{grid-template-columns:repeat(2,minmax(0,1fr))}
+.card-item.order .btn{margin-top:auto}
+.order-reward{display:flex;flex-direction:column;color:var(--brass);font:11px var(--mono)}
+.order-lines{display:flex;flex-direction:column;gap:2px;color:var(--text-dim);font-size:11px}
+.order-lines .short{color:#C4553F}
+.card-item.order.ready{border-color:#e0a44aad;background:linear-gradient(100deg,#e0a44a22,transparent),var(--surface)}
+.order-actions{display:flex;gap:5px;margin-top:auto}
+.order-actions .btn{flex:1;min-height:32px;padding:0 6px;font-size:12px}
+.order-actions .btn.quiet{color:var(--text-dim);border-color:var(--line)}
+.card-item.order-slot{border-style:dashed;opacity:.85}
+.card-item.order-slot .ci-qty{color:var(--brass);font-size:14px}
+@media (max-width:380px){.recipe-grid{grid-template-columns:1fr}}
+
+.bump{animation:bump .15s ease-out}
+@keyframes bump{from{transform:scale(1.18)}to{transform:scale(1)}}
+.row.ready{animation:rowFlash .3s ease-out}
+@keyframes rowFlash{from{background:#e0a44a55}to{background:linear-gradient(100deg,#e0a44a22,transparent),var(--surface)}}
+
+.modal{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:20px}
+.modal[aria-hidden="true"]{display:none}
+.backdrop{position:absolute;inset:0;border:0;background:#0B0806c7}
+.paper{position:relative;width:min(300px,100%);padding:22px 18px;border:1px solid #D4C7B4;border-radius:12px;background:var(--paper);color:var(--ink);text-align:center;box-shadow:0 18px 52px #0000006b}
+.paper small{display:block;color:#7A6855;font:10px var(--mono);letter-spacing:.12em}
+.paper h2{margin:8px 0 0;font:700 19px/1.3 var(--serif)}
+.paper p{margin:14px 0 0;color:var(--amber);font:700 34px/1 var(--mono)}
+  </style>
+</head>
+<body x-data="slowFarm" x-init="initGame()" x-cloak>
+<main class="frame">
+
+  <header id="hud" class="hud">
+    <div class="brand"><small>SLOW FARM</small><h1>慢慢农场</h1></div>
+    <div class="stat"><small>金币</small><b data-coins :class="flash.coins ? 'bump' : ''" x-text="hudView().coins">0</b></div>
+    <div class="stat"><small>钻石</small><b data-gems :class="flash.gems ? 'bump' : ''" x-text="hudView().gems">0</b></div>
+    <div class="stat"><small>等级</small><b data-level x-text="hudView().level">1</b></div>
+    <div class="stat"><small>仓库</small><b data-silo x-text="hudView().siloText">0/30</b></div>
+  </header>
+
+  <div id="xpbar" class="xpbar">
+    <div class="xp-track"><div class="xp-fill" :style="'width:' + levelInfo().percent + '%'"></div></div>
+    <span x-text="levelInfo().text"></span>
+  </div>
+
+  <nav id="tabs" class="tabs">
+    <button data-tab="farm" :aria-selected="tab==='farm'" @click="tab='farm'">农场</button>
+    <button data-tab="machines" :aria-selected="tab==='machines'" @click="tab='machines'">机器</button>
+    <button data-tab="orders" :aria-selected="tab==='orders'" @click="tab='orders'">订单</button>
+    <button data-tab="animals" :aria-selected="tab==='animals'" @click="tab='animals'">养殖</button>
+    <button data-tab="shop" :aria-selected="tab==='shop'" @click="tab='shop'">商场</button>
+    <button data-tab="silo" :aria-selected="tab==='silo'" @click="tab='silo'">仓库</button>
+  </nav>
+
+  <div class="stage">
+
+    <section id="panel-farm" class="panel" x-show="tab==='farm'">
+      <h2>农场<small x-text="'地块 ' + plotsView().length"></small></h2>
+      <div class="toolbar">
+        <button class="btn" data-open-seed-picker x-show="bulk().canPlant">一键种植</button>
+        <button class="btn" data-harvest-all x-show="bulk().canHarvest">一键收获</button>
+        <button class="btn" data-rush-all x-show="bulk().canRush">一键加速</button>
+      </div>
+      <ul id="plots" class="list">
+        <template x-for="plot in plotsView()" :key="plot.id">
+          <li class="row plot" :class="plot.status">
+            <div class="row-main">
+              <div class="row-title"><b x-text="'地块 ' + plot.id"></b><span x-text="plot.name"></span></div>
+              <div class="row-sub">
+                <span x-show="plot.status==='growing'" class="time" x-text="plot.durationText"></span>
+                <span x-show="plot.status==='ready'" class="ready-tag">可以收获了</span>
+              </div>
+            </div>
+            <div class="btn-group">
+              <template x-if="plot.status==='ready'">
+                <button class="btn solid" :data-harvest="plot.index">收获</button>
+              </template>
+              <template x-if="plot.status==='growing'">
+                <button class="btn" :data-use-hourglass-plot="plot.index">加速</button>
+              </template>
+              <template x-if="plot.status==='empty'">
+                <button class="btn" :data-open-seed-picker="plot.index">种植</button>
+              </template>
+            </div>
+          </li>
+        </template>
+        <template x-if="nextPlot()">
+          <li class="row locked plot-next">
+            <div class="row-main">
+              <div class="row-title"><b>新地块</b></div>
+              <div class="row-sub" x-text="nextPlot().hint"></div>
+            </div>
+            <div class="btn-group">
+              <button class="btn" :disabled="nextPlot().locked" data-buy-plot
+                      x-text="nextPlot().label"></button>
+            </div>
+          </li>
+        </template>
+      </ul>
+    </section>
+
+    <section id="panel-machines" class="panel" x-show="tab==='machines'">
+      <h2>机器<small x-text="'共 ' + machinesView().length + ' 台'"></small></h2>
+      <ul id="machines" class="grid-cards">
+        <template x-for="machine in machinesView()" :key="machine.id">
+          <li class="card-item machine" :class="machine.state" :data-open-machine="machine.state==='locked' ? null : machine.id">
+            <div class="ci-name" x-text="machine.name"></div>
+            <div class="ci-qty" x-text="machine.statusText"></div>
+            <div class="ci-tag" x-text="machine.hint"></div>
+            <template x-if="machine.state==='locked'">
+              <button class="btn" :disabled="!machine.levelOk"
+                      :data-buy-machine="machine.id"
+                      x-text="machine.levelOk ? ('解锁 ' + machine.buildCost) : ('Lv.' + machine.unlockLevel)"></button>
+            </template>
+          </li>
+        </template>
+      </ul>
+    </section>
+
+    <section id="panel-orders" class="panel" x-show="tab==='orders'">
+      <h2>订单<small x-text="orderSlotInfo().text"></small></h2>
+      <ul id="orders" class="grid-cards">
+        <template x-for="order in ordersView()" :key="order.id">
+          <li class="card-item order" :class="order.deliverable ? 'ready' : ''">
+            <div class="ci-name" x-text="'订单 ' + order.id"></div>
+            <div class="order-reward">
+              <span x-text="'金币 +' + order.coins"></span>
+              <span x-text="'经验 +' + order.xp"></span>
+            </div>
+            <div class="order-lines">
+              <template x-for="line in order.lines" :key="line.itemId">
+                <div :class="line.enough ? '' : 'short'"
+                     x-text="line.name + ' ' + line.owned + '/' + line.quantity"></div>
+              </template>
+            </div>
+            <div class="order-actions">
+              <button class="btn" :class="order.deliverable ? 'solid' : ''"
+                      :disabled="!order.deliverable" :data-deliver="order.id">交付</button>
+              <button class="btn quiet" :data-abandon-order="order.id">放弃</button>
+            </div>
+          </li>
+        </template>
+        <template x-if="orderSlotInfo().cost !== null">
+          <li class="card-item order-slot">
+            <div class="ci-name">新订单位</div>
+            <div class="ci-qty" x-text="orderSlotInfo().cost + ' 金币'"></div>
+            <div class="ci-tag">多接一张单</div>
+            <button class="btn" data-buy-order-slot>加位</button>
+          </li>
+        </template>
+      </ul>
+    </section>
+
+    <section id="panel-animals" class="panel" x-show="tab==='animals'">
+      <template x-for="yard in yardsView()" :key="yard.kind">
+        <div class="yard">
+          <h2>
+            <span x-text="yard.title"></span>
+            <small x-text="yard.countText"></small>
+            <button class="btn btn-sm" :data-feed-all="yard.kind" x-show="yard.canFeed">喂食全部</button>
+            <button class="btn btn-sm" :data-collect-all-animal="yard.kind" x-show="yard.canCollect">收取全部</button>
+          </h2>
+          <ul class="grid-cards">
+            <template x-for="animal in yard.animals" :key="animal.index">
+              <li class="card-item animal" :class="animal.state">
+                <div class="ci-name" x-text="yard.animalName + ' ' + (animal.index + 1)"></div>
+                <div class="ci-qty" x-text="animal.statusText"></div>
+                <div class="ci-tag" x-text="animal.hint"></div>
+                <button class="btn" x-show="animal.state==='hungry'"
+                        :data-feed-animal="yard.kind" :data-index="animal.index">喂食</button>
+                <button class="btn solid" x-show="animal.state==='ready'"
+                        :data-collect-animal="yard.kind" :data-index="animal.index">收取</button>
+              </li>
+            </template>
+            <li class="card-item animal-buy" :class="yard.canBuy ? '' : 'locked'">
+              <div class="ci-name" x-text="'买' + yard.unit"></div>
+              <div class="ci-qty" x-text="yard.price + ' 金币'"></div>
+              <div class="ci-tag" x-text="yard.buyHint"></div>
+              <button class="btn" :disabled="!yard.canBuy" :data-buy-animal="yard.kind">买入</button>
+            </li>
+            <template x-if="yard.slotCost !== null">
+              <li class="card-item order-slot">
+                <div class="ci-name">扩建畜舍</div>
+                <div class="ci-qty" x-text="yard.slotCost + ' 金币'"></div>
+                <div class="ci-tag" x-text="yard.slotHint"></div>
+                <button class="btn" :data-buy-stable="yard.kind">加位</button>
+              </li>
+            </template>
+          </ul>
+        </div>
+      </template>
+    </section>
+
+    <section id="panel-shop" class="panel" x-show="tab==='shop'">
+      <h2>商场<small>钻石与加速道具</small></h2>
+      <ul id="shop-grid" class="grid-cards">
+        <template x-for="pack in hourglassPacks()" :key="'hg' + pack.qty">
+          <li class="card-item">
+            <div class="ci-name" x-text="'沙漏 ×' + pack.qty"></div>
+            <div class="ci-qty" x-text="pack.cost + ' 钻'"></div>
+            <div class="ci-tag" x-text="pack.perText"></div>
+            <button class="btn" :disabled="!pack.affordable"
+                    :data-buy-hourglass="pack.qty">购买</button>
+          </li>
+        </template>
+        <li class="card-item">
+          <div class="ci-name">钻石</div>
+          <div class="ci-qty" x-text="'+' + gemConfig.adReward"></div>
+          <div class="ci-tag">看 3 秒模拟广告</div>
+          <button class="btn" data-watch-ad>观看广告</button>
+        </li>
+        <li class="card-item">
+          <div class="ci-name">钻石</div>
+          <div class="ci-qty" x-text="'+' + gemConfig.buyReward"></div>
+          <div class="ci-tag">模拟领取，不涉及真实支付</div>
+          <button class="btn" data-buy-gems>领取</button>
+        </li>
+      </ul>
+    </section>
+
+    <section id="panel-silo" class="panel" x-show="tab==='silo'">
+      <h2>仓库<small x-text="hudView().siloText"></small>
+        <button class="btn btn-sm" data-buy-slot :disabled="siloUpgrade().disabled"
+                x-text="siloUpgrade().label"></button>
+      </h2>
+      <ul id="silo-grid" class="grid-cards">
+        <template x-for="item in siloView()" :key="item.key">
+          <li class="card-item">
+            <div class="ci-name" x-text="item.name"></div>
+            <div class="ci-qty" x-text="item.quantity"></div>
+            <div class="ci-tag" x-text="item.kindName"></div>
+            <button class="btn" x-show="item.sellable" :data-open-sell="item.id">卖出</button>
+          </li>
+        </template>
+        <li x-show="siloView().length===0" class="empty-note">仓库是空的</li>
+      </ul>
+    </section>
+
+  </div>
+
+  <section id="logs" class="logbox">
+    <h3>日志</h3>
+    <ol>
+      <template x-for="entry in logs" :key="entry.id">
+        <li><time x-text="entry.time"></time><span x-text="entry.text"></span></li>
+      </template>
+    </ol>
+  </section>
+
+</main>
+
+<div id="ad-modal" class="modal" aria-hidden="true">
+  <div class="backdrop"></div>
+  <div class="paper">
+    <small>模拟广告 · 不涉及真实广告</small>
+    <h2>读完就发放奖励</h2>
+    <p id="ad-count">3</p>
+  </div>
+</div>
+
+<div id="seed-modal" class="modal" :aria-hidden="seedPicker ? 'false' : 'true'">
+  <button class="backdrop" data-close-seed-picker aria-label="关闭"></button>
+  <div class="paper">
+    <small>种子 · 现种现买</small>
+    <h2 x-text="seedPickerTarget === null
+      ? ('选一种种子，种满 ' + emptyPlots() + ' 块空地')
+      : '选一种种子，种下这一块'"></h2>
+    <div class="seed-list">
+      <template x-for="seed in seedCatalog()" :key="seed.id">
+        <button class="seed-choice" :data-seed-choice="seed.id" :disabled="!seed.affordable">
+          <span x-text="seed.name"></span>
+          <b x-text="seed.price + ' 金币 · ' + seed.timeText"></b>
+        </button>
+      </template>
+    </div>
+    <p class="seed-empty" x-show="seedCatalog().length===0">等级不够，还没有可以种的种子</p>
+  </div>
+</div>
+
+<div id="sell-modal" class="modal" :aria-hidden="sellPicker.open ? 'false' : 'true'">
+  <button class="backdrop" data-close-sell aria-label="关闭"></button>
+  <div class="paper">
+    <small>卖出</small>
+    <h2 x-text="'卖出 ' + sellPicker.name"></h2>
+    <p class="sell-num"><b x-text="sellPicker.quantity"></b><span x-text="' / ' + sellPicker.max"></span></p>
+    <input class="sell-range" type="range" min="1" :max="sellPicker.max || 1"
+           x-model.number="sellPicker.quantity" aria-label="卖出数量">
+    <div class="sell-actions">
+      <button class="btn" data-close-sell>取消</button>
+      <button class="btn solid" data-confirm-sell x-text="'换 ' + sellCoins() + ' 金币'"></button>
+    </div>
+  </div>
+</div>
+<div id="machine-modal" class="modal" :aria-hidden="machineDetail ? 'false' : 'true'">
+  <button class="backdrop" data-close-machine aria-label="关闭"></button>
+  <div class="paper paper-wide">
+    <small>机器详情</small>
+    <h2 x-text="machineDetail ? MACHINES[machineDetail].name : ''"></h2>
+
+    <div class="queue-head">
+      <span x-text="'队列 ' + queueInfo(machineDetail).text"></span>
+      <button class="mini-btn" data-rush-machine x-text="'加速 · 沙漏 ' + hourglassCount()"></button>
+    </div>
+    <div class="queue-grid">
+      <template x-for="slot in queueView(machineDetail)" :key="slot.index">
+        <div class="queue-cell" :class="slot.state">
+          <b x-text="slot.index"></b>
+          <span x-text="slot.title"></span>
+          <em x-text="slot.detail"></em>
+        </div>
+      </template>
+      <button class="queue-cell add" x-show="queueInfo(machineDetail).cost !== null" data-buy-queue>
+        <b>+</b>
+        <em x-text="queueInfo(machineDetail).cost === null ? '' : queueInfo(machineDetail).cost"></em>
+      </button>
+    </div>
+    <button class="btn collect-all" data-collect-machine x-show="hasReady()">全部收取</button>
+
+    <h3 class="sub-title">可以生产</h3>
+    <div class="recipe-grid">
+      <template x-for="recipe in recipeView(machineDetail)" :key="recipe.id">
+        <div class="recipe" :class="recipe.unlocked ? '' : 'locked'">
+          <div class="recipe-name" x-text="recipe.name"></div>
+          <template x-if="!recipe.levelOk">
+            <div class="recipe-hint" x-text="'Lv.' + recipe.unlockLevel + ' 开放'"></div>
+          </template>
+          <template x-if="recipe.levelOk && !recipe.unlocked">
+            <button class="btn" :data-unlock-recipe="recipe.id" style="margin-top:6px">解锁</button>
+          </template>
+          <template x-if="recipe.unlocked">
+            <div class="recipe-body">
+              <div class="recipe-ing">
+                <template x-for="ing in recipe.ingredients" :key="ing.name">
+                  <span :class="ing.enough ? '' : 'short'"
+                        x-text="ing.name + ' ' + ing.have + '/' + ing.need"></span>
+                </template>
+              </div>
+              <div class="recipe-time" x-text="recipe.timeText"></div>
+              <button class="btn" :data-enqueue="recipe.id" :data-machine="machineDetail">加入队列</button>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<script defer src="../assets/vendor/alpine-3.17.5.min.js"></script>
+<script src="slow-farm-rules.js"></script>
+<script src="slow-farm-core.js"></script>
+<script src="slow-farm-store.js"></script>
+<script src="slow-farm-app.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var rules = {
+    ITEMS: ITEMS, CROPS: CROPS, MACHINES: MACHINES, RECIPES: RECIPES, QUEUE: QUEUE,
+    LEVELS: LEVELS, PLOTS: PLOTS, SILO: SILO, ORDERS: ORDERS,
+    ANIMALS: ANIMALS, GEMS: GEMS, SELL_RATIO: SELL_RATIO, START: START,
+  };
+
+  var logSeq = 0;
+  var LOG_LIMIT = 30;
+
+  function pad(n) {
+    return n < 10 ? '0' + n : String(n);
+  }
+
+  // 模拟广告：倒计时 3 秒后发奖励，不接任何真实广告或支付。
+  var uiAdProvider = {
+    show: function () {
+      return new Promise(function (resolve) {
+        var modal = document.getElementById('ad-modal');
+        var counter = document.getElementById('ad-count');
+        var left = Math.round(GEMS.adWaitMs / 1000);
+        modal.setAttribute('aria-hidden', 'false');
+        counter.textContent = String(left);
+        var timer = setInterval(function () {
+          left -= 1;
+          if (left > 0) {
+            counter.textContent = String(left);
+            return;
+          }
+          clearInterval(timer);
+          modal.setAttribute('aria-hidden', 'true');
+          resolve(true);
+        }, 1000);
+      });
+    },
+  };
+
+  function clockText(date) {
+    return pad(date.getHours()) + ':' + pad(date.getMinutes());
+  }
+
+  document.addEventListener('alpine:init', function () {
+    Alpine.data('slowFarm', function () {
+      return {
+        state: null,
+        tab: 'farm',
+        logs: [],
+        nowTick: Date.now(),
+        gemConfig: GEMS,
+        seedPicker: false,
+        seedPickerTarget: null,
+        machineDetail: null,
+        sellPicker: { open: false, id: '', name: '', max: 0, quantity: 1 },
+        flash: { coins: false, gems: false },
+        lastCoins: null,
+        lastGems: null,
+        app: createApp({
+          rules: rules,
+          store: createStore(localAdapter()),
+          now: function () { return Date.now(); },
+          adProvider: uiAdProvider,
+          wrapState: function (value) { return Alpine.reactive(value); },
+        }),
+
+        async initGame() {
+          var started = await this.app.start();
+          this.state = started.state;
+          this.nowTick = Date.now();
+          this.addLog('欢迎来到慢慢农场');
+          activeInstance = this;
+          this.syncHud();
+          startTimer(this);
+        },
+
+        syncHud() {
+          var hud = this.hudView();
+          this.lastCoins = hud.coins;
+          this.lastGems = hud.gems;
+        },
+
+        tick() {
+          this.nowTick = Date.now();
+          if (!this.state) return;
+          var hud = this.hudView();
+          if (this.lastCoins !== null && hud.coins !== this.lastCoins) this.bump('coins');
+          if (this.lastGems !== null && hud.gems !== this.lastGems) this.bump('gems');
+          this.lastCoins = hud.coins;
+          this.lastGems = hud.gems;
+        },
+
+        bump(key) {
+          var self = this;
+          this.flash[key] = true;
+          setTimeout(function () { self.flash[key] = false; }, 150);
+        },
+
+        addLog(text) {
+          logSeq += 1;
+          this.logs.unshift({ id: logSeq, time: clockText(new Date()), text: text });
+          if (this.logs.length > LOG_LIMIT) this.logs.length = LOG_LIMIT;
+        },
+
+        // ---- 只读派生 ----
+        hudView() {
+          var s = this.state;
+          if (!s) return { coins: '0', gems: '0', level: '1', siloText: '0/0' };
+          return {
+            coins: String(s.coins),
+            gems: String(s.gems),
+            level: String(levelOf(s.xp, rules)),
+            siloText: siloSlotsUsed(s, rules) + '/' + siloCap(s) + ' 格',
+          };
+        },
+
+        plotsView() {
+          var s = this.state;
+          if (!s) return [];
+
+          return s.plots.map(function (plot, index) {
+            if (!plot.cropId) {
+              return {
+                index: index,
+                id: plot.id,
+                name: '',
+                status: 'empty',
+                durationText: '',
+              };
+            }
+            var ready = plot.readyAt <= this.nowTick;
+            return {
+              index: index,
+              id: plot.id,
+              name: ITEMS[plot.cropId].name,
+              status: ready ? 'ready' : 'growing',
+              durationText: formatDuration(remainingMs(plot.readyAt, this.nowTick)),
+            };
+          }, this);
+        },
+
+        machinesView() {
+          var s = this.state;
+          if (!s) return [];
+          var level = levelOf(s.xp, rules);
+          var self = this;
+
+          return Object.keys(MACHINES).map(function (id) {
+            var def = MACHINES[id];
+            var machine = s.machines[id];
+
+            if (!machine.unlocked) {
+              return {
+                id: id,
+                name: def.name,
+                state: 'locked',
+                levelOk: level >= def.unlockLevel,
+                buildCost: def.buildCost,
+                unlockLevel: def.unlockLevel,
+                statusText: 'Lv.' + def.unlockLevel,
+                hint: level >= def.unlockLevel ? ('可解锁，' + def.buildCost + ' 金币') : '等级不够',
+              };
+            }
+
+            var ready = machine.queue.filter(function (job) { return job.readyAt <= self.nowTick; }).length;
+            var running = machine.queue.find(function (job) { return job.readyAt > self.nowTick; });
+            var working = machine.queue.length;
+
+            if (ready > 0) {
+              return {
+                id: id, name: def.name, state: 'ready', levelOk: true,
+                statusText: '可收 ' + ready,
+                hint: '点开收取',
+              };
+            }
+            if (running) {
+              return {
+                id: id, name: def.name, state: 'working', levelOk: true,
+                statusText: formatDuration(remainingMs(running.readyAt, self.nowTick)),
+                hint: '队列 ' + working + '/' + machine.queueSize,
+              };
+            }
+            return {
+              id: id, name: def.name, state: 'idle', levelOk: true,
+              statusText: '空闲',
+              hint: '点开安排生产',
+            };
+          });
+        },
+
+        queueView(machineId) {
+          var s = this.state;
+          if (!s || !machineId) return [];
+          var machine = s.machines[machineId];
+          if (!machine) return [];
+
+          var self = this;
+          var slots = [];
+          for (var i = 0; i < machine.queueSize; i += 1) {
+            var job = machine.queue[i];
+            if (!job) {
+              slots.push({ index: i + 1, state: 'empty', title: '空位', detail: '' });
+            } else if (job.readyAt <= self.nowTick) {
+              slots.push({ index: i + 1, state: 'ready', title: RECIPES[job.recipeId].name, detail: '可以收进仓库' });
+            } else {
+              slots.push({
+                index: i + 1,
+                state: 'working',
+                title: RECIPES[job.recipeId].name,
+                detail: formatDuration(remainingMs(job.readyAt, self.nowTick)),
+              });
+            }
+          }
+          return slots;
+        },
+
+        yardsView() {
+          var s = this.state;
+          if (!s) return [];
+          var level = levelOf(s.xp, rules);
+          var self = this;
+
+          return Object.keys(ANIMALS).map(function (kind) {
+            var def = ANIMALS[kind];
+            var group = s.animals[kind];
+            var animals = group.list.map(function (animal, index) {
+              var state;
+              if (animal.readyAt === 0) state = 'hungry';
+              else if (animal.readyAt <= self.nowTick) state = 'ready';
+              else state = 'growing';
+
+              return {
+                index: index,
+                state: state,
+                statusText: state === 'hungry'
+                  ? '饿着'
+                  : (state === 'ready'
+                    ? '可收'
+                    : formatDuration(remainingMs(animal.readyAt, self.nowTick))),
+                hint: state === 'hungry'
+                  ? '喂一份饲料'
+                  : (state === 'ready' ? ITEMS[def.product].name + ' 已就绪' : '产出中'),
+              };
+            });
+
+            var slotIndex = group.slots - def.initialSlots;
+            var slotCost = slotIndex >= 0 && slotIndex < def.slotPrices.length
+              ? def.slotPrices[slotIndex]
+              : null;
+
+            return {
+              kind: kind,
+              title: def.name + '舍',
+              unit: def.name,
+              animalName: def.name,
+              countText: group.list.length + ' / ' + group.slots + ' 只',
+              animals: animals,
+              canFeed: (s.silo.feed || 0) > 0 && animals.some(function (a) { return a.state === 'hungry'; }),
+              canCollect: animals.some(function (a) { return a.state === 'ready'; }),
+              canBuy: level >= def.unlockLevel
+                && group.list.length < group.slots
+                && s.coins >= def.price,
+              price: def.price,
+              buyHint: level < def.unlockLevel
+                ? ('Lv.' + def.unlockLevel + ' 开放')
+                : (group.list.length >= group.slots
+                  ? '畜舍满了'
+                  : ('每只产 ' + ITEMS[def.product].name)),
+              slotCost: slotCost,
+              slotHint: slotCost === null ? '' : ('当前 ' + group.slots + ' 个位置'),
+            };
+          });
+        },
+
+        orderSlotInfo() {
+          var s = this.state;
+          if (!s) return { text: '', cost: null };
+          var maxed = s.orderSlots >= ORDERS.maxSlots;
+          return {
+            text: s.orderSlots + ' / ' + ORDERS.maxSlots + ' 位',
+            cost: maxed ? null : ORDERS.slotPrices[s.orderSlots - ORDERS.initialSlots],
+          };
+        },
+
+        levelInfo() {
+          var s = this.state;
+          if (!s) return { percent: 0, text: '' };
+          var level = levelOf(s.xp, rules);
+          if (level >= LEVELS.length) return { percent: 100, text: '满级 ' + s.xp };
+          var base = LEVELS[level - 1];
+          var next = LEVELS[level];
+          var percent = Math.min(100, Math.round(((s.xp - base) / (next - base)) * 100));
+          return { percent: percent, text: 'Lv.' + level + '  经验 ' + s.xp + ' / ' + next };
+        },
+
+        hourglassCount() {
+          return this.state ? this.state.hourglasses : 0;
+        },
+
+        hasReady() {
+          if (!this.machineDetail) return false;
+          return this.queueView(this.machineDetail).some(function (slot) { return slot.state === 'ready'; });
+        },
+
+        queueInfo(machineId) {
+          var s = this.state;
+          if (!s || !machineId) return { text: '', cost: null };
+          var machine = s.machines[machineId];
+          if (!machine) return { text: '', cost: null };
+          var index = machine.queueSize - QUEUE.initial;
+          var cost = index >= 0 && index < QUEUE.prices.length ? QUEUE.prices[index] : null;
+          return { text: machine.queueSize + ' / ' + QUEUE.max + ' 位', cost: cost };
+        },
+
+        recipeView(machineId) {
+          var s = this.state;
+          if (!s || !machineId) return [];
+          var level = levelOf(s.xp, rules);
+
+          return Object.keys(RECIPES).filter(function (rid) {
+            return RECIPES[rid].machine === machineId;
+          }).map(function (rid) {
+            var recipe = RECIPES[rid];
+            return {
+              id: rid,
+              name: recipe.name,
+              timeText: formatDuration(recipe.ms),
+              unlocked: Boolean(s.unlockedRecipes[rid]),
+              levelOk: recipe.unlockLevel <= level,
+              unlockLevel: recipe.unlockLevel,
+              ingredients: Object.keys(recipe.input).map(function (itemId) {
+                var have = s.silo[itemId] || 0;
+                return {
+                  name: ITEMS[itemId].name,
+                  need: recipe.input[itemId],
+                  have: have,
+                  enough: have >= recipe.input[itemId],
+                };
+              }),
+            };
+          });
+        },
+
+        ordersView() {
+          var s = this.state;
+          if (!s) return [];
+          return s.orders.map(function (order) {
+            var lines = order.lines.map(function (line) {
+              var owned = s.silo[line.itemId] || 0;
+              return {
+                itemId: line.itemId,
+                name: ITEMS[line.itemId].name,
+                quantity: line.quantity,
+                owned: owned,
+                enough: owned >= line.quantity,
+              };
+            });
+            return {
+              id: order.id,
+              coins: order.coins,
+              xp: order.xp,
+              lines: lines,
+              deliverable: lines.every(function (line) { return line.enough; }),
+            };
+          });
+        },
+
+        siloView() {
+          var s = this.state;
+          if (!s) return [];
+          var cards = [];
+
+          Object.keys(s.silo).forEach(function (itemId) {
+            var count = s.silo[itemId];
+            if (!(count > 0) || !ITEMS[itemId]) return;
+            var item = ITEMS[itemId];
+            cards.push({
+              key: 'item:' + itemId,
+              id: itemId,
+              name: item.name,
+              quantity: count,
+              kindName: (item.category === 'crop' ? '作物' : '成品')
+                + (count > SILO.perSlot ? ' · ' + Math.ceil(count / SILO.perSlot) + ' 格' : ''),
+              sellable: true,
+            });
+          });
+
+          return cards;
+        },
+
+        bulk() {
+          var s = this.state;
+          if (!s) return { any: false, canPlant: false, canHarvest: false, canRush: false };
+
+          var canPlant = false;
+          var canHarvest = false;
+          var canRush = false;
+
+          for (var i = 0; i < s.plots.length; i += 1) {
+            var plot = s.plots[i];
+            if (!plot.cropId) {
+              canPlant = true;
+            } else if (plot.readyAt <= this.nowTick) {
+              canHarvest = true;
+            } else {
+              canRush = true;
+            }
+          }
+
+          return {
+            any: canPlant || canHarvest || canRush,
+            canPlant: canPlant,
+            canHarvest: canHarvest,
+            canRush: canRush,
+          };
+        },
+
+        nextPlot() {
+          var s = this.state;
+          if (!s || s.plots.length >= PLOTS.max) return null;
+          var entry = PLOTS.prices[s.plots.length - PLOTS.initial];
+          var unlocked = levelOf(s.xp, rules) >= entry.level;
+          return {
+            locked: !unlocked,
+            hint: unlocked
+              ? ('开垦后多一块地，当前 ' + s.plots.length + ' 块')
+              : ('Lv.' + entry.level + ' 开放'),
+            label: unlocked ? ('开垦 ' + entry.cost) : '未解锁',
+          };
+        },
+
+        sellCoins() {
+          var picker = this.sellPicker;
+          if (!picker.open || !ITEMS[picker.id]) return 0;
+          var percent = Math.round(SELL_RATIO * 100);
+          return Math.floor((ITEMS[picker.id].sellPrice * picker.quantity * percent) / 100);
+        },
+
+        seedCatalog() {
+          var s = this.state;
+          if (!s) return [];
+          var level = levelOf(s.xp, rules);
+          return Object.keys(CROPS).filter(function (id) {
+            return ITEMS[id].unlockLevel <= level;
+          }).map(function (id) {
+            return {
+              id: id,
+              name: ITEMS[id].name,
+              price: CROPS[id].seedPrice,
+              timeText: formatDuration(CROPS[id].growMs),
+              affordable: s.coins >= CROPS[id].seedPrice,
+            };
+          });
+        },
+
+        emptyPlots() {
+          var s = this.state;
+          if (!s) return 0;
+          return s.plots.filter(function (plot) { return !plot.cropId; }).length;
+        },
+
+        siloUpgrade() {
+          var s = this.state;
+          if (!s) return { label: '开格', disabled: true };
+          if (s.siloSlots >= SILO.max) return { label: '格子已满', disabled: true };
+          var cost = SILO.prices[s.siloSlots - SILO.initial];
+          return { label: '开格 ' + cost, disabled: false };
+        },
+
+        hourglassPacks() {
+          var s = this.state;
+          var gems = s ? s.gems : 0;
+          return GEMS.hourglassPacks.map(function (pack) {
+            return {
+              qty: pack.qty,
+              cost: pack.cost,
+              affordable: gems >= pack.cost,
+              perText: '单价 ' + (Math.round((pack.cost / pack.qty) * 10) / 10) + ' 钻',
+            };
+          });
+        },
+      };
+    });
+  });
+
+  var tickTimer = null;
+  var activeInstance = null;
+
+  var ACTION_ATTRS = [
+    'data-open-machine',
+    'data-close-machine',
+    'data-collect-machine',
+    'data-enqueue',
+    'data-unlock-recipe',
+    'data-buy-queue',
+    'data-rush-machine',
+    'data-open-seed-picker',
+    'data-close-seed-picker',
+    'data-seed-choice',
+    'data-harvest-all',
+    'data-rush-all',
+    'data-plant',
+    'data-harvest',
+    'data-use-hourglass-plot',
+    'data-start-job',
+    'data-collect',
+    'data-use-hourglass-machine',
+    'data-deliver',
+    'data-abandon-order',
+    'data-buy-order-slot',
+    'data-buy-animal',
+    'data-feed-animal',
+    'data-collect-animal',
+    'data-feed-all',
+    'data-collect-all-animal',
+    'data-buy-stable',
+    'data-buy-plot',
+    'data-buy-machine',
+    'data-buy-slot',
+    'data-open-sell',
+    'data-close-sell',
+    'data-confirm-sell',
+    'data-buy-hourglass',
+    'data-watch-ad',
+    'data-buy-gems',
+  ];
+
+  var ACTION_SELECTOR = ACTION_ATTRS.map(function (name) {
+    return '[' + name + ']';
+  }).join(',');
+
+  function startTimer(target) {
+    stopTimer();
+    tickTimer = setInterval(function () { target.tick(); }, 250);
+  }
+
+  function stopTimer() {
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = null;
+    }
+  }
+
+  function failText(result) {
+    return reasons[result.reason] || '操作失败';
+  }
+
+  function itemSummary(bag) {
+    return Object.keys(bag).map(function (itemId) {
+      return ITEMS[itemId].name + ' x' + bag[itemId];
+    }).join(' ');
+  }
+
+  function attrOf(el) {
+    for (var i = 0; i < ACTION_ATTRS.length; i += 1) {
+      if (el.hasAttribute(ACTION_ATTRS[i])) return ACTION_ATTRS[i];
+    }
+    return null;
+  }
+
+  async function perform(attr, el) {
+    var data = el.dataset;
+    var api = activeInstance.app;
+    var result = null;
+    var text = '';
+
+    if (attr === 'data-open-machine') {
+      activeInstance.machineDetail = data.openMachine;
+      return;
+    }
+
+    if (attr === 'data-close-machine') {
+      activeInstance.machineDetail = null;
+      return;
+    }
+
+    if (attr === 'data-collect-machine') {
+      result = await api.collectReady(activeInstance.machineDetail);
+      if (result.ok) {
+        var collected = Object.keys(result.items);
+        text = collected.length
+          ? ('收取 ' + itemSummary(result.items))
+          : '仓库已满，收不进去';
+        if (result.skipped > 0 && collected.length) text += '，' + result.skipped + ' 件收不下';
+      }
+    } else if (attr === 'data-enqueue') {
+      result = await api.enqueue(data.machine, data.enqueue);
+      if (result.ok) text = '开工 ' + RECIPES[data.enqueue].name;
+    } else if (attr === 'data-unlock-recipe') {
+      result = await api.unlockRecipe(data.unlockRecipe);
+      if (result.ok) text = '解锁配方 ' + RECIPES[data.unlockRecipe].name;
+    } else if (attr === 'data-buy-queue') {
+      result = await api.buyQueueSlot(activeInstance.machineDetail);
+      if (result.ok) text = '队列多了一个位置';
+    } else if (attr === 'data-rush-machine') {
+      result = await api.useHourglass({ kind: 'machine', id: activeInstance.machineDetail });
+      if (result.ok) text = '沙漏让队首立刻完工';
+    } else if (attr === 'data-open-seed-picker') {
+      var rawTarget = data.openSeedPicker;
+      activeInstance.seedPickerTarget = rawTarget === '' ? null : Number(rawTarget);
+      activeInstance.seedPicker = true;
+      return;
+    }
+
+    if (attr === 'data-close-seed-picker') {
+      activeInstance.seedPicker = false;
+      return;
+    }
+
+    if (attr === 'data-seed-choice') {
+      var cropId = data.seedChoice;
+      var cropName = ITEMS[cropId].name;
+      var price = CROPS[cropId].seedPrice;
+      var pickTarget = activeInstance.seedPickerTarget;
+      result = pickTarget === null
+        ? await api.plantAll(cropId)
+        : await api.plant(pickTarget, cropId);
+      activeInstance.seedPicker = false;
+      if (result.ok) {
+        if (pickTarget === null) {
+          if (result.planted > 0) {
+            text = '种下 ' + cropName + ' x' + result.planted + '，花费 ' + (result.planted * price) + ' 金币';
+          } else if (result.blocked === 'no_coins') {
+            text = '金币不够，' + cropName + '种子要 ' + price;
+          } else {
+            text = '没有空地可以种';
+          }
+        } else {
+          text = '种下 ' + cropName + '，花费 ' + price + ' 金币';
+        }
+      }
+    } else if (attr === 'data-harvest-all') {
+      result = await api.harvestAll();
+      if (result.ok) {
+        var got = itemSummary(result.items);
+        if (got) {
+          text = '一键收获 ' + got;
+          if (result.skipped > 0) text += '，仓库已满还剩 ' + result.skipped + ' 块没收';
+        } else if (result.skipped > 0) {
+          text = '仓库已满，' + result.skipped + ' 块作物收不了';
+        } else {
+          text = '没有可收获的作物';
+        }
+      }
+    } else if (attr === 'data-rush-all') {
+      result = await api.useHourglassOnPlots();
+      if (result.ok) {
+        if (result.used > 0) {
+          text = '沙漏加速了 ' + result.used + ' 项';
+          if (result.stopped === 'no_hourglass') text += '，沙漏用完了';
+        } else if (result.stopped === 'no_hourglass') {
+          text = '没有沙漏';
+        } else {
+          text = '没有正在进行中的计时';
+        }
+      }
+    } else if (attr === 'data-plant') {
+      result = await api.plant(Number(data.plot), data.plant);
+      if (result.ok) text = '种下 ' + ITEMS[data.plant].name;
+    } else if (attr === 'data-harvest') {
+      result = await api.harvest(Number(data.harvest));
+      if (result.ok) text = '收获 ' + ITEMS[result.itemId].name + ' x' + result.qty;
+    } else if (attr === 'data-use-hourglass-plot') {
+      result = await api.useHourglass({ kind: 'plot', index: Number(data.useHourglassPlot) });
+      if (result.ok) text = '沙漏让一块地立刻成熟';
+    } else if (attr === 'data-start-job') {
+      result = await api.startJob(data.machine, data.startJob);
+      if (result.ok) text = '开工 ' + RECIPES[data.startJob].name;
+    } else if (attr === 'data-collect') {
+      result = await api.collectJob(data.collect);
+      if (result.ok) text = '收取 ' + itemSummary(result.items);
+    } else if (attr === 'data-use-hourglass-machine') {
+      result = await api.useHourglass({ kind: 'machine', id: data.useHourglassMachine });
+      if (result.ok) text = '沙漏让机器立刻完工';
+    } else if (attr === 'data-deliver') {
+      result = await api.deliverOrder(data.deliver);
+      if (result.ok) text = '交付订单 ' + data.deliver + '  金币+' + result.coins + '  经验+' + result.xp;
+    } else if (attr === 'data-abandon-order') {
+      result = await api.abandonOrder(data.abandonOrder);
+      if (result.ok) text = '放弃了订单 ' + data.abandonOrder + '，换了一张新的';
+    } else if (attr === 'data-buy-animal') {
+      result = await api.buyAnimal(data.buyAnimal);
+      if (result.ok) text = '买了一只' + ANIMALS[data.buyAnimal].name;
+    } else if (attr === 'data-feed-animal') {
+      result = await api.feedAnimal(data.feedAnimal, Number(data.index));
+      if (result.ok) text = '喂了一份饲料';
+    } else if (attr === 'data-collect-animal') {
+      result = await api.collectAnimal(data.collectAnimal, Number(data.index));
+      if (result.ok) text = '收获 ' + ITEMS[result.itemId].name;
+    } else if (attr === 'data-feed-all') {
+      result = await api.feedAll(data.feedAll);
+      if (result.ok) text = result.fed > 0 ? ('喂了 ' + result.fed + ' 只') : '没有可喂的动物';
+    } else if (attr === 'data-collect-all-animal') {
+      result = await api.collectAll(data.collectAllAnimal);
+      if (result.ok) {
+        var gotAnimals = itemSummary(result.items);
+        text = gotAnimals ? ('收取 ' + gotAnimals) : '仓库已满，收不进去';
+      }
+    } else if (attr === 'data-buy-stable') {
+      result = await api.buyStableSlot(data.buyStable);
+      if (result.ok) text = '畜舍多了一个位置';
+    } else if (attr === 'data-buy-order-slot') {
+      result = await api.buyOrderSlot();
+      if (result.ok) text = '订单位多了一个';
+    } else if (attr === 'data-buy-plot') {
+      result = await api.buyPlot();
+      if (result.ok) text = '扩建了一块地';
+    } else if (attr === 'data-buy-machine') {
+      var machineId = data.buyMachine;
+      result = await api.buyMachine(machineId);
+      if (result.ok) text = '建好 ' + MACHINES[machineId].name;
+    } else if (attr === 'data-buy-slot') {
+      result = await api.buySiloSlot();
+      if (result.ok) text = '仓库多了一格';
+    } else if (attr === 'data-open-sell') {
+      var sellId = data.openSell;
+      var owned = activeInstance.state.silo[sellId] || 0;
+      activeInstance.sellPicker = {
+        open: true,
+        id: sellId,
+        name: ITEMS[sellId].name,
+        max: owned,
+        quantity: owned,
+      };
+      return;
+    } else if (attr === 'data-close-sell') {
+      activeInstance.sellPicker.open = false;
+      return;
+    } else if (attr === 'data-confirm-sell') {
+      var picker = activeInstance.sellPicker;
+      var amount = Math.min(Math.max(1, Math.floor(Number(picker.quantity) || 0)), picker.max);
+      result = await api.sellItem(picker.id, amount);
+      if (result.ok) {
+        text = '卖出 ' + picker.name + ' x' + amount + '  金币+' + result.coins;
+        picker.open = false;
+      }
+    } else if (attr === 'data-buy-hourglass') {
+      var packQty = Number(data.buyHourglass);
+      result = await api.buyHourglass(packQty);
+      if (result.ok) text = '买入沙漏 x' + packQty;
+    } else if (attr === 'data-watch-ad') {
+      result = await api.watchAd();
+      if (result.ok) text = '模拟广告 +' + GEMS.adReward + ' 钻石';
+    } else if (attr === 'data-buy-gems') {
+      result = await api.buyGems();
+      if (result.ok) text = '模拟购买 +' + GEMS.buyReward + ' 钻石';
+    }
+
+    if (!result) return;
+    activeInstance.addLog(result.ok ? text : failText(result));
+  }
+
+  document.addEventListener('click', function (ev) {
+    if (!activeInstance || !ev.target.closest) return;
+    var el = ev.target.closest(ACTION_SELECTOR);
+    if (!el) return;
+    var attr = attrOf(el);
+    if (!attr) return;
+    perform(attr, el).catch(function () { activeInstance.addLog('操作失败'); });
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (!activeInstance) return;
+    if (document.hidden) {
+      stopTimer();
+      activeInstance.app.save();
+      return;
+    }
+    activeInstance.nowTick = Date.now();
+    startTimer(activeInstance);
+  });
+})();
+</script>
+</body>
+</html>
