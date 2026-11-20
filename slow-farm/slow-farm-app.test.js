@@ -49,6 +49,26 @@ function memoryAdapter() {
   assert.strictEqual(ad.ok, true);
   assert.strictEqual(state.gems, 5 + rules.GEMS.adReward);
 
+  // 动物加速：单个 target 与一键加速都经 app 透传并落盘
+  state.xp = 500;
+  state.coins = 5000;
+  state.silo.feed = 2;
+  await app.buyAnimal('chicken');
+  await app.buyAnimal('chicken');
+  await app.feedAnimal('chicken', 0);
+  await app.feedAnimal('chicken', 1);
+  state.hourglasses = 2;
+  const rushOne = await app.useHourglass({ kind: 'animal', kindId: 'chicken', index: 0 });
+  assert.strictEqual(rushOne.ok, true, 'app 透传动物 target');
+  assert.strictEqual(state.animals.chicken.list[0].readyAt, clock, '动物 readyAt 被拉到当前时刻');
+  const batchRush = await app.useHourglassOnAnimals('chicken');
+  assert.deepStrictEqual(batchRush, { ok: true, used: 1, stopped: null });
+  assert.strictEqual(state.animals.chicken.list[1].readyAt, clock);
+  assert.strictEqual(state.hourglasses, 0);
+  await app.collectAnimal('chicken', 0);
+  await app.collectAnimal('chicken', 1);
+  assert.strictEqual(state.xp, 502, '收集动物加经验');
+
   // 广告失败时不发钻石
   const failing = createApp({
     rules, store, now: () => clock, rng: () => 0,

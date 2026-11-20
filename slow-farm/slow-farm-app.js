@@ -124,6 +124,7 @@ function createApp({ rules, store, now, rng = Math.random, adProvider = instantA
     buyHourglass: (quantity) => run(() => core.buyHourglass(state, quantity, rules)),
     useHourglass: (target) => run(() => core.useHourglass(state, target, now(), rules)),
     useHourglassOnPlots: () => run(() => core.useHourglassOnPlots(state, now(), rules)),
+    useHourglassOnAnimals: (kind) => run(() => core.useHourglassOnAnimals(state, kind, now(), rules)),
 
     buyGems: () => run(() => core.grantPaidGems(state, rules)),
 

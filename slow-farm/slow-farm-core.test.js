@@ -372,6 +372,49 @@ assert.strictEqual(core.useHourglass(rush, { kind: 'machine', id: 'mill' }, 6000
 // 空地上用沙漏
 assert.strictEqual(core.useHourglass(rush, { kind: 'plot', index: 5 }, 60000, rules).reason, 'nothing_running');
 
+// 动物：产出中用沙漏立刻可收
+const rushYard = core.createState(rules, () => 0);
+rushYard.xp = 500;
+rushYard.coins = 1000;
+rushYard.silo = { feed: 2 };
+core.buyAnimal(rushYard, 'chicken', rules);
+core.feedAnimal(rushYard, 'chicken', 0, 1000, rules);
+rushYard.hourglasses = 1;
+assert.deepStrictEqual(
+  core.useHourglass(rushYard, { kind: 'animal', kindId: 'chicken', index: 0 }, 60000, rules),
+  { ok: true }
+);
+assert.strictEqual(rushYard.animals.chicken.list[0].readyAt, 60000, '沙漏把动物的 readyAt 拉到当前时刻');
+assert.strictEqual(rushYard.hourglasses, 0);
+
+// 动物饿着或位置不存在时不给沙漏
+const idleYard = core.createState(rules, () => 0);
+idleYard.xp = 500;
+idleYard.coins = 1000;
+core.buyAnimal(idleYard, 'chicken', rules);
+idleYard.hourglasses = 1;
+assert.strictEqual(
+  core.useHourglass(idleYard, { kind: 'animal', kindId: 'chicken', index: 0 }, 60000, rules).reason,
+  'nothing_running'
+);
+assert.strictEqual(
+  core.useHourglass(idleYard, { kind: 'animal', kindId: 'chicken', index: 9 }, 60000, rules).reason,
+  'nothing_running'
+);
+assert.strictEqual(idleYard.hourglasses, 1, '失败不消耗沙漏');
+
+// 没有沙漏时动物加速返回 no_hourglass
+const dryYard = core.createState(rules, () => 0);
+dryYard.xp = 500;
+dryYard.coins = 1000;
+dryYard.silo = { feed: 1 };
+core.buyAnimal(dryYard, 'chicken', rules);
+core.feedAnimal(dryYard, 'chicken', 0, 1000, rules);
+assert.strictEqual(
+  core.useHourglass(dryYard, { kind: 'animal', kindId: 'chicken', index: 0 }, 60000, rules).reason,
+  'no_hourglass'
+);
+
 // 广告与购买：只发钻石，不做支付
 const gemmy = core.createState(rules, () => 0);
 assert.deepStrictEqual(core.grantAdGems(gemmy, rules), { ok: true, gems: 5 + rules.GEMS.adReward });
@@ -519,6 +562,7 @@ const readyAt = farmYard.animals.chicken.list[0].readyAt;
 assert.deepStrictEqual(core.collectAnimal(farmYard, 'chicken', 0, readyAt, rules), { ok: true, itemId: 'egg' });
 assert.strictEqual(farmYard.silo.egg, 1);
 assert.strictEqual(farmYard.animals.chicken.list[0].readyAt, 0);
+assert.strictEqual(farmYard.xp, 501, '收取动物与收获作物一样给 1 点经验');
 
 // 等级不够养不了牛
 assert.strictEqual(core.buyAnimal(farmYard, 'cow', rules).ok, false);
@@ -538,6 +582,41 @@ herd.animals.chicken.list.forEach(function (animal) {
 });
 assert.deepStrictEqual(core.collectAll(herd, 'chicken', 100, rules), { ok: true, items: { egg: 3 }, skipped: 0 });
 assert.strictEqual(herd.silo.egg, 3);
+assert.strictEqual(herd.xp, 503, '一键收取走同一条路径，同样加经验');
+
+// 一键加速动物：每只正在产出的动物消耗一个沙漏，沙漏不够就停
+const herdRush = core.createState(rules, () => 0);
+herdRush.xp = 500;
+herdRush.coins = 5000;
+herdRush.silo = { feed: 10 };
+core.buyAnimal(herdRush, 'chicken', rules);
+core.buyAnimal(herdRush, 'chicken', rules);
+core.buyAnimal(herdRush, 'chicken', rules);
+core.feedAll(herdRush, 'chicken', 0, rules);
+herdRush.hourglasses = 2;
+assert.deepStrictEqual(core.useHourglassOnAnimals(herdRush, 'chicken', 60000, rules), {
+  ok: true, used: 2, stopped: 'no_hourglass',
+});
+assert.strictEqual(herdRush.animals.chicken.list[0].readyAt, 60000);
+assert.strictEqual(herdRush.animals.chicken.list[1].readyAt, 60000);
+assert.strictEqual(
+  herdRush.animals.chicken.list[2].readyAt,
+  rules.ANIMALS.chicken.cycleMs,
+  '沙漏用完，剩下的动物保持原进度'
+);
+assert.strictEqual(herdRush.hourglasses, 0);
+
+// 没有正在产出的动物：不消耗沙漏
+const idleHerd = core.createState(rules, () => 0);
+idleHerd.xp = 500;
+idleHerd.coins = 5000;
+core.buyAnimal(idleHerd, 'chicken', rules);
+idleHerd.hourglasses = 1;
+assert.deepStrictEqual(core.useHourglassOnAnimals(idleHerd, 'chicken', 60000, rules), {
+  ok: true, used: 0, stopped: null,
+});
+assert.strictEqual(idleHerd.hourglasses, 1);
+assert.strictEqual(core.useHourglassOnAnimals(idleHerd, 'ghost', 60000, rules).reason, 'unknown_animal');
 
 // 畜舍位置：满了不能再买
 const tiny = core.createState(rules, () => 0);

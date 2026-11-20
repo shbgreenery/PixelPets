@@ -1004,6 +1004,7 @@ function collectAnimal(state, kind, index, nowMs, rules) {
   if (!canStore(state, addition)) return { ok: false, reason: 'silo_full' };
 
   state.silo[def.product] = (state.silo[def.product] || 0) + 1;
+  state.xp += 1;
   state.stats.animalItems += 1;
   animal.readyAt = 0;
   return { ok: true, itemId: def.product };
@@ -1079,15 +1080,21 @@ function buyHourglass(state, quantity, rules) {
 }
 
 function useHourglass(state, target, nowMs, rules) {
-  if (!target || (target.kind !== 'plot' && target.kind !== 'machine')) {
+  if (!target || (target.kind !== 'plot' && target.kind !== 'machine' && target.kind !== 'animal')) {
     return { ok: false, reason: 'bad_target' };
   }
 
   let readyAt;
+  let animal = null;
   if (target.kind === 'plot') {
     const plot = state.plots[target.index];
     if (!plot || !plot.cropId) return { ok: false, reason: 'nothing_running' };
     readyAt = plot.readyAt;
+  } else if (target.kind === 'animal') {
+    const group = state.animals[target.kindId];
+    animal = group && group.list[target.index];
+    if (!animal) return { ok: false, reason: 'nothing_running' };
+    readyAt = animal.readyAt;
   } else {
     const machine = state.machines[target.id];
     const running = machine && machine.queue.find(function (job) { return job.readyAt > nowMs; });
@@ -1100,6 +1107,8 @@ function useHourglass(state, target, nowMs, rules) {
 
   if (target.kind === 'plot') {
     state.plots[target.index].readyAt = nowMs;
+  } else if (target.kind === 'animal') {
+    animal.readyAt = nowMs;
   } else {
     const machine = state.machines[target.id];
     const saved = readyAt - nowMs;
@@ -1187,6 +1196,29 @@ function useHourglassOnPlots(state, nowMs, rules) {
   return { ok: true, used, stopped };
 }
 
+// 养殖页的一键加速只作用于正在产出的动物。
+function useHourglassOnAnimals(state, kind, nowMs, rules) {
+  const group = state.animals[kind];
+  if (!group) return { ok: false, reason: 'unknown_animal' };
+
+  const targets = [];
+  group.list.forEach((animal, index) => {
+    if (animal.readyAt > nowMs) targets.push({ kind: 'animal', kindId: kind, index });
+  });
+
+  let used = 0;
+  let stopped = null;
+  for (const target of targets) {
+    if (!(state.hourglasses > 0)) {
+      stopped = 'no_hourglass';
+      break;
+    }
+    if (useHourglass(state, target, nowMs, rules).ok) used += 1;
+  }
+
+  return { ok: true, used, stopped };
+}
+
 const CORE = {
   validateContent,
   createState,
@@ -1235,6 +1267,7 @@ const CORE = {
   plantAll,
   harvestAll,
   useHourglassOnPlots,
+  useHourglassOnAnimals,
 };
 
 if (typeof module !== 'undefined') {

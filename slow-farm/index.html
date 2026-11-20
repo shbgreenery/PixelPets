@@ -374,6 +374,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
             <small x-text="yard.countText"></small>
             <button class="btn btn-sm" :data-feed-all="yard.kind" x-show="yard.canFeed">喂食全部</button>
             <button class="btn btn-sm" :data-collect-all-animal="yard.kind" x-show="yard.canCollect">收取全部</button>
+            <button class="btn btn-sm" :data-rush-all-animal="yard.kind" x-show="yard.canRush">全部加速</button>
           </h2>
           <ul class="grid-cards">
             <template x-for="animal in yard.animals" :key="animal.index">
@@ -385,6 +386,8 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
                         :data-feed-animal="yard.kind" :data-index="animal.index">喂食</button>
                 <button class="btn solid" x-show="animal.state==='ready'"
                         :data-collect-animal="yard.kind" :data-index="animal.index">收取</button>
+                <button class="btn" x-show="animal.state==='growing'"
+                        :data-use-hourglass-animal="yard.kind" :data-index="animal.index">加速</button>
               </li>
             </template>
             <li class="card-item animal-buy" :class="yard.canBuy ? '' : 'locked'">
@@ -960,6 +963,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
               animals: animals,
               canFeed: (s.silo.feed || 0) > 0 && animals.some(function (a) { return a.state === 'hungry'; }),
               canCollect: animals.some(function (a) { return a.state === 'ready'; }),
+              canRush: animals.some(function (a) { return a.state === 'growing'; }),
               canBuy: level >= def.unlockLevel
                 && group.list.length < group.slots
                 && s.coins >= def.price,
@@ -1193,6 +1197,8 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
     'data-plant',
     'data-harvest',
     'data-use-hourglass-plot',
+    'data-use-hourglass-animal',
+    'data-rush-all-animal',
     'data-start-job',
     'data-collect',
     'data-use-hourglass-machine',
@@ -1448,6 +1454,18 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
           text = '没有正在进行中的计时';
         }
       }
+    } else if (attr === 'data-rush-all-animal') {
+      result = await api.useHourglassOnAnimals(data.rushAllAnimal);
+      if (result.ok) {
+        if (result.used > 0) {
+          text = '沙漏加速了 ' + result.used + ' 只动物';
+          if (result.stopped === 'no_hourglass') text += '，沙漏用完了';
+        } else if (result.stopped === 'no_hourglass') {
+          text = '没有沙漏';
+        } else {
+          text = '没有正在产出的动物';
+        }
+      }
     } else if (attr === 'data-plant') {
       result = await api.plant(Number(data.plot), data.plant);
       if (result.ok) text = '种下 ' + ITEMS[data.plant].name;
@@ -1481,6 +1499,9 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
     } else if (attr === 'data-collect-animal') {
       result = await api.collectAnimal(data.collectAnimal, Number(data.index));
       if (result.ok) text = '收获 ' + ITEMS[result.itemId].name;
+    } else if (attr === 'data-use-hourglass-animal') {
+      result = await api.useHourglass({ kind: 'animal', kindId: data.useHourglassAnimal, index: Number(data.index) });
+      if (result.ok) text = '沙漏让一只动物立刻产出';
     } else if (attr === 'data-feed-all') {
       result = await api.feedAll(data.feedAll);
       if (result.ok) text = result.fed > 0 ? ('喂了 ' + result.fed + ' 只') : '没有可喂的动物';
