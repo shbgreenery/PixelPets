@@ -17,25 +17,57 @@ function migrate(raw) {
 }
 
 function createStore(adapter) {
-  return {
-    async load() {
-      let text;
-      try {
-        text = await adapter.read();
-      } catch (e) {
-        return null;
-      }
-      if (!text) return null;
-      try {
-        return migrate(JSON.parse(text));
-      } catch (e) {
-        return null;
-      }
-    },
+  // 坏档先留一份原文：读不出来也别让下一次保存把它彻底冲掉。
+  async function keepBackup(text) {
+    if (typeof adapter.backup !== 'function') return;
+    try {
+      await adapter.backup(text);
+    } catch (e) {
+      // 备份失败不阻塞开局
+    }
+  }
 
+  // 比 load 多一个 problem：empty / parse / version / read，供界面区分「没档」和「档坏了」
+  async function loadDetailed() {
+    let text;
+    try {
+      text = await adapter.read();
+    } catch (e) {
+      return { state: null, problem: 'read' };
+    }
+    if (!text) return { state: null, problem: 'empty' };
+
+    let raw;
+    try {
+      raw = JSON.parse(text);
+    } catch (e) {
+      await keepBackup(text);
+      return { state: null, problem: 'parse' };
+    }
+    if (!raw || typeof raw !== 'object') {
+      await keepBackup(text);
+      return { state: null, problem: 'parse' };
+    }
+    if (raw.version !== SAVE_VERSION) {
+      await keepBackup(text);
+      return { state: null, problem: 'version' };
+    }
+    return { state: migrate(raw), problem: null };
+  }
+
+  return {
+    loadDetailed,
+    load: async () => (await loadDetailed()).state,
+
+    // 返回是否落盘成功；调用方不能假设一定成功
     async save(state) {
       const text = JSON.stringify({ version: SAVE_VERSION, payload: state });
-      await adapter.write(text);
+      try {
+        const ok = await adapter.write(text);
+        return ok !== false;
+      } catch (e) {
+        return false;
+      }
     },
 
     async clear() {
@@ -55,12 +87,25 @@ function localAdapter(key = SAVE_KEY) {
       }
     },
 
+    // 返回是否写入成功：隐私模式、存储被禁用或容量不足时返回 false，交由界面提示
     async write(text) {
-      if (typeof localStorage === 'undefined') return;
+      if (typeof localStorage === 'undefined') return false;
       try {
         localStorage.setItem(key, text);
+        return true;
       } catch (e) {
-        // 隐私模式或容量不足时静默失败
+        return false;
+      }
+    },
+
+    // 坏档原文的归宿：只在备份位还空着时写入，避免覆盖更早的好备份
+    async backup(text) {
+      if (typeof localStorage === 'undefined') return;
+      try {
+        const backupKey = key + '.bak';
+        if (!localStorage.getItem(backupKey)) localStorage.setItem(backupKey, text);
+      } catch (e) {
+        // 忽略
       }
     },
 

@@ -117,5 +117,31 @@ function memoryAdapter() {
   const reopened = await dailyApp2.start();
   assert.strictEqual(reopened.state.dailyOrder, null, '交完当天重开不再补单');
 
+  // 写盘失败时动作照样成功，但必须带上 saveFailed 让界面提示
+  const failingAdapter = memoryAdapter();
+  failingAdapter.write = async () => false;
+  const failingStore = createStore(failingAdapter);
+  const failingApp = createApp({ rules, store: failingStore, now: () => clock, rng: () => 0 });
+  const failingStart = await failingApp.start();
+  assert.strictEqual(failingStart.saveFailed, true, '读档后的首次落盘失败要上报');
+  const failingPlant = await failingApp.plant(failingApp.getState().plots.length - 1, 'wheat');
+  assert.strictEqual(failingPlant.ok, true, '写盘失败不影响内存里的动作结果');
+  assert.strictEqual(failingPlant.saveFailed, true, '动作写盘失败要标记');
+
+  // 坏档重开：要能告诉界面「档坏了」，而不是假装全新开局
+  const badAdapter = memoryAdapter();
+  await badAdapter.write('{bad json');
+  const badApp = createApp({ rules, store: createStore(badAdapter), now: () => clock, rng: () => 0 });
+  const badStart = await badApp.start();
+  assert.strictEqual(badStart.loadProblem, 'parse', '坏档要上报 problem');
+  assert.strictEqual(badStart.state.xp, 0);
+
+  // 正常读档时 problem 为空
+  const cleanAdapter = memoryAdapter();
+  const cleanApp = createApp({ rules, store: createStore(cleanAdapter), now: () => clock, rng: () => 0 });
+  const cleanStart = await cleanApp.start();
+  assert.strictEqual(cleanStart.loadProblem, null);
+  assert.strictEqual(cleanStart.saveFailed, false);
+
   console.log('slow-farm-app 通过');
 })();

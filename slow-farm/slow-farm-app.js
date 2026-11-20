@@ -50,18 +50,21 @@ function createApp({ rules, store, now, rng = Math.random, adProvider = instantA
   let state = null;
 
   async function persist() {
-    if (!state) return;
+    if (!state) return false;
     state.lastSeenAt = now();
-    await store.save(state);
+    return store.save(state);
   }
 
   async function start() {
-    const loaded = await store.load();
+    const detail = await store.loadDetailed();
+    const loaded = detail.state;
     const awayMs = loaded && loaded.lastSeenAt ? Math.max(0, now() - loaded.lastSeenAt) : 0;
     state = wrapState(loaded ? core.hydrate(loaded, rules, rng) : core.createState(rules, rng));
     core.ensureDailyOrder(state, rules, rng, now());
-    await persist();
-    return { state, awayMs };
+    const saveFailed = !(await persist());
+    // 首次开局没有存档是正常的；只有读不出来才算 problem
+    const loadProblem = detail.problem && detail.problem !== 'empty' ? detail.problem : null;
+    return { state, awayMs, loadProblem, saveFailed };
   }
 
   async function run(action) {
@@ -72,7 +75,7 @@ function createApp({ rules, store, now, rng = Math.random, adProvider = instantA
       const tasks = core.evaluateTasks(state, rules);
       if (unlocked.length > 0) result.unlocked = unlocked;
       if (tasks.length > 0) result.tasks = tasks;
-      await persist();
+      if (!(await persist())) result.saveFailed = true;
     }
     return result;
   }
@@ -85,8 +88,9 @@ function createApp({ rules, store, now, rng = Math.random, adProvider = instantA
     if (!state) return { ok: false, reason: 'no_state' };
     const tasks = core.visitTab(state, tab, rules);
     const unlocked = core.evaluateAchievements(state, rules);
-    if (tasks.length > 0 || unlocked.length > 0) await persist();
-    return { ok: true, tasks, unlocked };
+    let saveFailed = false;
+    if (tasks.length > 0 || unlocked.length > 0) saveFailed = !(await persist());
+    return { ok: true, tasks, unlocked, saveFailed };
   }
 
   return {

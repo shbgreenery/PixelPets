@@ -194,6 +194,11 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
 .card-item.animal.hungry{opacity:.85}
 .card-item.animal-buy{border-style:dashed}
 
+/* 存档异常提示：只在写盘失败或旧档读不出时出现 */
+.save-warn{display:flex;align-items:center;gap:8px;margin:0 14px 8px;padding:8px 10px;border:1px solid #8C3B2E;border-radius:6px;background:#2A1614;color:#E8B4A6;font-size:12px;line-height:1.4}
+.save-warn span{flex:1}
+.save-warn-close{border:0;background:none;color:inherit;font-size:14px;line-height:1;cursor:pointer;padding:0 2px}
+
 /* 经验条 */
 .xpbar{display:flex;align-items:center;gap:8px;padding:0 14px 8px}
 .xp-track{flex:1;height:4px;overflow:hidden;border-radius:2px;background:#0D0B09}
@@ -241,6 +246,11 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
     <div class="stat"><small>仓库</small><b data-silo x-text="hudView().siloText">0/30</b></div>
     <button class="hud-btn" data-open-settings>设置</button>
   </header>
+
+  <div id="save-warn" class="save-warn" role="status" x-show="saveIssue" x-cloak>
+    <span x-text="saveIssue"></span>
+    <button type="button" class="save-warn-close" @click="saveIssue = ''" aria-label="关闭提示">×</button>
+  </div>
 
   <div id="xpbar" class="xpbar">
     <div class="xp-track"><div class="xp-fill" :style="'width:' + levelInfo().percent + '%'"></div></div>
@@ -670,6 +680,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
         machineDetail: null,
         awayReport: null,
         settingsOpen: false,
+        saveIssue: '',
         soundOn: soundEnabled,
         sellPicker: { open: false, id: '', name: '', max: 0, quantity: 1 },
         flash: { coins: false, gems: false },
@@ -689,6 +700,8 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
           this.state = started.state;
           this.nowTick = Date.now();
           this.addLog('欢迎来到慢慢农场');
+          if (started.loadProblem) this.reportLoadProblem(started.loadProblem);
+          if (started.saveFailed) this.reportSaveIssue();
           if (started.awayMs > 120000) this.showAway(started.awayMs);
           activeInstance = this;
           this.syncHud();
@@ -736,6 +749,24 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
           if (sum.animalItems > 0) rows.push({ key: 'animal', label: '动物产出', value: sum.animalItems + ' 份' });
           if (sum.orders > 0) rows.push({ key: 'order', label: '可以交的订单', value: sum.orders + ' 张' });
           this.awayReport = { title: '你离开了 ' + formatDuration(awayMs), rows: rows };
+        },
+
+        // 旧档读不出来时，别让玩家以为进度是凭空消失的
+        reportLoadProblem(problem) {
+          var backupKey = 'pixelpets.slowfarm.save.bak';
+          if (problem === 'version') {
+            this.saveIssue = '旧存档版本不兼容，已备份到 ' + backupKey + '，现在从新存档开始。';
+          } else if (problem === 'parse') {
+            this.saveIssue = '旧存档无法读取，已备份到 ' + backupKey + '，现在从新存档开始。';
+          } else {
+            this.saveIssue = '读取存档失败，现在从新存档开始。';
+          }
+          this.addLog('存档读取异常：' + problem);
+        },
+
+        // 写盘失败（无痕模式、存储被禁用、容量不足）必须让玩家看见
+        reportSaveIssue() {
+          this.saveIssue = '当前浏览器无法保存进度（可能是无痕模式或存储被禁用），关闭页面后进度会丢失。';
         },
 
         addLog(text) {
@@ -1574,6 +1605,7 @@ button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
     }
 
     activeInstance.addLog(result.ok ? text : failText(result));
+    if (result.saveFailed) activeInstance.reportSaveIssue();
     if (result.unlocked) {
       result.unlocked.forEach(function (deed) {
         activeInstance.addLog('成就解锁：' + deed.name + '  +' + (deed.reward || 0) + ' 金币');
