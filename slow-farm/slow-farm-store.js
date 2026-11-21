@@ -16,6 +16,25 @@ function migrate(raw) {
   return raw.payload;
 }
 
+// 存档文本 → 状态，不碰适配器：读档和导入共用同一套校验
+function parse(text) {
+  if (!text) return { state: null, problem: 'empty' };
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (e) {
+    return { state: null, problem: 'parse' };
+  }
+  if (!raw || typeof raw !== 'object') return { state: null, problem: 'parse' };
+  if (raw.version !== SAVE_VERSION) return { state: null, problem: 'version' };
+  return { state: migrate(raw), problem: null };
+}
+
+// 状态 → 存档文本：导出与写盘共用同一个包装
+function exportText(state) {
+  return JSON.stringify({ version: SAVE_VERSION, payload: state });
+}
+
 function createStore(adapter) {
   // 坏档先留一份原文：读不出来也别让下一次保存把它彻底冲掉。
   async function keepBackup(text) {
@@ -35,33 +54,21 @@ function createStore(adapter) {
     } catch (e) {
       return { state: null, problem: 'read' };
     }
-    if (!text) return { state: null, problem: 'empty' };
-
-    let raw;
-    try {
-      raw = JSON.parse(text);
-    } catch (e) {
-      await keepBackup(text);
-      return { state: null, problem: 'parse' };
-    }
-    if (!raw || typeof raw !== 'object') {
-      await keepBackup(text);
-      return { state: null, problem: 'parse' };
-    }
-    if (raw.version !== SAVE_VERSION) {
-      await keepBackup(text);
-      return { state: null, problem: 'version' };
-    }
-    return { state: migrate(raw), problem: null };
+    const parsed = parse(text);
+    // 坏档和版本不符先留原文，别让下一次保存把它冲掉
+    if (parsed.problem === 'parse' || parsed.problem === 'version') await keepBackup(text);
+    return parsed;
   }
 
   return {
     loadDetailed,
     load: async () => (await loadDetailed()).state,
+    parse,
+    exportText,
 
     // 返回是否落盘成功；调用方不能假设一定成功
     async save(state) {
-      const text = JSON.stringify({ version: SAVE_VERSION, payload: state });
+      const text = exportText(state);
       try {
         const ok = await adapter.write(text);
         return ok !== false;
@@ -121,5 +128,5 @@ function localAdapter(key = SAVE_KEY) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { SAVE_VERSION, SAVE_KEY, migrate, createStore, localAdapter };
+  module.exports = { SAVE_VERSION, SAVE_KEY, migrate, parse, exportText, createStore, localAdapter };
 }

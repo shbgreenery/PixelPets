@@ -143,5 +143,52 @@ function memoryAdapter() {
   assert.strictEqual(cleanStart.loadProblem, null);
   assert.strictEqual(cleanStart.saveFailed, false);
 
+  // 导出：拿到的是完整存档文本，且能被重新读回
+  const exportedText = cleanApp.exportSave();
+  assert.ok(typeof exportedText === 'string', '导出应有文本');
+  assert.strictEqual(JSON.parse(exportedText).payload.xp, cleanApp.getState().xp, '导出的是当前状态');
+
+  // 导入前的预览：不碰当前进度，只告诉你文件里是什么
+  const importTarget = createApp({ rules, store: createStore(memoryAdapter()), now: () => clock, rng: () => 0 });
+  await importTarget.start();
+  const preview = importTarget.inspectSave(exportedText);
+  assert.strictEqual(preview.ok, true, '合法文件应能预览');
+  assert.strictEqual(preview.level, 1, '预览里带等级');
+  assert.strictEqual(importTarget.getState().xp, 0, '预览不能改动当前状态');
+
+  // 导入：写入成功并落盘，之后读档能看到导入的进度
+  const importAdapter = memoryAdapter();
+  const importApp = createApp({ rules, store: createStore(importAdapter), now: () => clock, rng: () => 0 });
+  await importApp.start();
+  const sourceState = importApp.getState();
+  sourceState.xp = 27000;
+  sourceState.coins = 12345;
+  const sourceText = importApp.exportSave();
+
+  const targetApp = createApp({ rules, store: createStore(importAdapter), now: () => clock, rng: () => 0 });
+  await targetApp.start();
+  const imported = await targetApp.importSave(sourceText);
+  assert.strictEqual(imported.ok, true, '合法存档应导入成功');
+  assert.strictEqual(targetApp.getState().xp, 27000, '内存里换成导入的进度');
+  const persisted = await createStore(importAdapter).load();
+  assert.strictEqual(persisted.xp, 27000, '导入后必须立刻落盘');
+
+  // 坏文件不能被导入，也不能破坏当前进度
+  const beforeXp = targetApp.getState().xp;
+  const rejected = await targetApp.importSave('{bad json');
+  assert.strictEqual(rejected.ok, false, '坏文件必须拒绝');
+  assert.strictEqual(rejected.reason, 'bad_file');
+  assert.strictEqual(targetApp.getState().xp, beforeXp, '拒绝时不能改动当前进度');
+  assert.strictEqual(targetApp.inspectSave('').ok, false, '空文件也要拒绝');
+
+  // 导入时写盘失败要上报，不能假装成功
+  const noWriteAdapter = memoryAdapter();
+  const noWriteApp = createApp({ rules, store: createStore(noWriteAdapter), now: () => clock, rng: () => 0 });
+  await noWriteApp.start();
+  noWriteAdapter.write = async () => false;
+  const failedImport = await noWriteApp.importSave(sourceText);
+  assert.strictEqual(failedImport.ok, true, '内存导入仍算成功');
+  assert.strictEqual(failedImport.saveFailed, true, '写盘失败必须标记');
+
   console.log('slow-farm-app 通过');
 })();

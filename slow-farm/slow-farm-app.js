@@ -44,6 +44,16 @@ const reasons = {
   no_hourglass: '没有沙漏',
   nothing_running: '没有正在进行的计时',
   ad_failed: '广告加载失败',
+  file_empty: '文件是空的',
+  bad_file: '这个文件不是有效的存档',
+  file_version: '存档版本不兼容',
+};
+
+// 导入失败时把存档层的 problem 翻译成界面能显示的原因
+const importReasons = {
+  empty: 'file_empty',
+  parse: 'bad_file',
+  version: 'file_version',
 };
 
 function createApp({ rules, store, now, rng = Math.random, adProvider = instantAdProvider, wrapState = (x) => x }) {
@@ -84,6 +94,30 @@ function createApp({ rules, store, now, rng = Math.random, adProvider = instantA
     return state;
   }
 
+  // 导出：当前进度的存档文本，交给界面存成文件
+  function exportSave() {
+    return state ? store.exportText(state) : null;
+  }
+
+  // 只读预览：告诉界面文件里是几级，不碰当前进度
+  function inspectSave(text) {
+    const parsed = store.parse(text);
+    if (parsed.problem) return { ok: false, reason: importReasons[parsed.problem] || 'bad_file' };
+    const saved = parsed.state && typeof parsed.state === 'object' ? parsed.state : {};
+    const xp = Number.isFinite(saved.xp) && saved.xp >= 0 ? saved.xp : 0;
+    return { ok: true, xp, level: core.levelOf(xp, rules) };
+  }
+
+  // 导入：校验通过才替换内存状态，并立刻落盘
+  async function importSave(text) {
+    const parsed = store.parse(text);
+    if (parsed.problem) return { ok: false, reason: importReasons[parsed.problem] || 'bad_file' };
+    state = wrapState(core.hydrate(parsed.state, rules, rng));
+    core.ensureDailyOrder(state, rules, rng, now());
+    const saveFailed = !(await persist());
+    return { ok: true, state, saveFailed };
+  }
+
   async function visitTab(tab) {
     if (!state) return { ok: false, reason: 'no_state' };
     const tasks = core.visitTab(state, tab, rules);
@@ -98,6 +132,9 @@ function createApp({ rules, store, now, rng = Math.random, adProvider = instantA
     getState: current,
     visitTab,
     save: persist,
+    exportSave,
+    inspectSave,
+    importSave,
 
     plant: (plotIndex, cropId) => run(() => core.plant(state, plotIndex, cropId, now(), rules)),
     harvest: (plotIndex) => run(() => core.harvest(state, plotIndex, now(), rules)),

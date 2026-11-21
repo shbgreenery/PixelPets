@@ -76,5 +76,14 @@ function memoryAdapter() {
   await createStore(emptyWithBackup).loadDetailed();
   assert.deepStrictEqual(emptyBackups, [], '空档不应触发备份');
 
+  // 导出/导入用的纯函数：文本 → 状态，状态 → 文本
+  const exportStore = createStore(memoryAdapter());
+  const exported = exportStore.exportText(state);
+  assert.ok(typeof exported === 'string', '导出应得到文本');
+  assert.deepStrictEqual(exportStore.parse(exported), { state, problem: null }, '导出的文本应能原样读回');
+  assert.strictEqual(exportStore.parse('').problem, 'empty', '空文本算空档');
+  assert.strictEqual(exportStore.parse('{bad json').problem, 'parse', '坏文本算坏档');
+  assert.strictEqual(exportStore.parse(JSON.stringify({ version: 99, payload: {} })).problem, 'version', '版本不符要单独区分');
+
   console.log('slow-farm-store 通过');
 })();
