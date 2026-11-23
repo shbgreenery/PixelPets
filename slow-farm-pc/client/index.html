@@ -13,24 +13,28 @@
         background: #120f09;
         overflow: hidden;
       }
-      /* 舞台固定 1280×720，与 src/display/stage.ts 的 DESIGN_WIDTH/HEIGHT 一致，窗口只负责居中。 */
       body {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      #stage {
         position: relative;
-        flex: none;
+      }
+      /* 舞台固定 1280×720 设计单位，与 src/display/stage.ts 的 DESIGN_WIDTH/HEIGHT 一致。
+         显示大小靠 transform 等比缩放（由 stage.ts 的 applyStageFit 写入），
+         布局盒不变，DOM 覆盖层与画布因此共享同一套坐标。 */
+      #stage {
+        position: absolute;
+        left: 50%;
+        top: 50%;
         width: 1280px;
         height: 720px;
         overflow: hidden;
+        transform-origin: center center;
+        transform: translate(-50%, -50%) scale(1);
       }
       #game {
         position: absolute;
         inset: 0;
       }
-      /* 画布后备分辨率由 DPR 决定，这里把显示尺寸锁死为设计尺寸，避免被拉伸发糊。 */
+      /* 画布的 CSS 尺寸恒为设计尺寸；清晰度由后备像素（渲染系数）保证，
+         屏幕放大交给 #stage 的 transform。 */
       #game canvas {
         display: block;
         width: 1280px;

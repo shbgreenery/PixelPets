@@ -2,7 +2,7 @@ import type Phaser from "phaser";
 import type { GameState, Rules } from "../api/client";
 import { stallViews, type StallTone } from "../display/barnView";
 import { animalIcon } from "../display/icons";
-import { stageDpr } from "../display/stage";
+import { renderScale } from "../display/stage";
 import { FONT_FAMILY, PALETTE, STAGE_COLOR } from "../display/theme";
 
 const CARD_RADIUS = 14;
@@ -104,7 +104,7 @@ export class BarnView {
 
   private buildStall(kind: string, left: number, width: number): Stall {
     const { y } = this.bounds;
-    const resolution = stageDpr();
+    const resolution = renderScale();
     const card = this.scene.add.graphics();
     const penLeft = left + 14;
     const penTop = y - PEN_SIZE / 2;

@@ -4,8 +4,7 @@ import type { Meta, Rules } from "./api/client";
 import {
   DESIGN_HEIGHT,
   DESIGN_WIDTH,
-  getStage,
-  stageDpr,
+  applyStageFit,
 } from "./display/stage";
 import { FarmScene } from "./scenes/FarmScene";
 import { GameStore } from "./state/store";
@@ -56,18 +55,15 @@ async function bootstrap(): Promise<void> {
   const store = new GameStore(api, meta?.rules ?? EMPTY_RULES);
   await store.load(meta ?? undefined);
 
-  // 舞台盒子尺寸以常量为准，避免与 index.html 初值漂移。
-  const stage = getStage();
-  stage.style.width = `${DESIGN_WIDTH}px`;
-  stage.style.height = `${DESIGN_HEIGHT}px`;
+  // 舞台按窗口等比缩放；返回的 render 是后备像素倍数，同时决定画布尺寸。
+  let { render } = applyStageFit();
 
-  // 后备分辨率 = 设计尺寸 × dpr；CSS 尺寸由样式固定为设计尺寸，画面不再随窗口拉伸。
-  const dpr = stageDpr();
+  // 后备分辨率 = 设计尺寸 × 渲染系数；CSS 尺寸固定为设计尺寸，放大交给 #stage 的 transform。
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: "game",
-    width: DESIGN_WIDTH * dpr,
-    height: DESIGN_HEIGHT * dpr,
+    width: DESIGN_WIDTH * render,
+    height: DESIGN_HEIGHT * render,
     backgroundColor: "#120f09",
     scale: {
       mode: Phaser.Scale.NONE,
@@ -80,13 +76,18 @@ async function bootstrap(): Promise<void> {
   new Hud(store);
   startPolling(store, meta);
 
-  // DPR 变化（如拖到外接屏）时整页重载，让后备分辨率与相机缩放重新对齐。
-  let currentDpr = dpr;
+  // 窗口变化（含拖到不同 DPR 的外接屏）时，显示系数总会更新。
+  // 渲染系数变了才重建画布；没变也必须 refresh()：CSS transform 改变了画布的
+  // 实际显示尺寸，不重算 displayScale 的话指针坐标会整体偏移
+  //（Retina 上 render 顶到上限后就会出现这种情况）。
   window.addEventListener("resize", () => {
-    const next = stageDpr();
-    if (next === currentDpr) return;
-    currentDpr = next;
-    window.location.reload();
+    const next = applyStageFit();
+    if (next.render === render) {
+      game.scale.refresh();
+      return;
+    }
+    render = next.render;
+    game.scale.resize(DESIGN_WIDTH * render, DESIGN_HEIGHT * render);
   });
 }
 

@@ -1,5 +1,5 @@
 import type Phaser from "phaser";
-import { stageDpr } from "../display/stage";
+import { renderScale } from "../display/stage";
 import { FONT_FAMILY, PALETTE, STAGE_COLOR } from "../display/theme";
 
 const ITEM_WIDTH = 125;
@@ -44,7 +44,7 @@ export class DockView {
 
     entries.forEach((entry, index) => {
       const x = startX + index * (ITEM_WIDTH + ITEM_GAP);
-      const resolution = stageDpr();
+      const resolution = renderScale();
       const bg = scene.add.graphics().setDepth(2);
       const icon = scene.add
         .text(x, y - 12, entry.icon, {

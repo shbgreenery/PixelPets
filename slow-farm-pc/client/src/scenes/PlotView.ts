@@ -3,7 +3,7 @@ import type { GameState, Plot } from "../api/client";
 import { formatCountdown, remainingMs } from "../display/format";
 import { cropIcon } from "../display/icons";
 import { prefersReducedMotion } from "../display/motion";
-import { stageDpr } from "../display/stage";
+import { renderScale } from "../display/stage";
 import { FONT_FAMILY, PALETTE, STAGE_COLOR } from "../display/theme";
 
 export type PlotStage = "empty" | "growing" | "ready";
@@ -131,7 +131,7 @@ export class PlotView {
         fontSize: `${ICON_SIZE}px`,
         color: PALETTE.ink,
       })
-      .setResolution(stageDpr())
+      .setResolution(renderScale())
       .setOrigin(0.5)
       .setShadow(0, 4, "#000000", 6);
 
@@ -141,7 +141,7 @@ export class PlotView {
         fontSize: LABEL_SIZE,
         color: PALETTE.ink2,
       })
-      .setResolution(stageDpr())
+      .setResolution(renderScale())
       .setOrigin(0.5);
 
     const barWidth = this.width - BAR_INSET * 2;
@@ -166,7 +166,7 @@ export class PlotView {
         fontStyle: "bold",
         color: PALETTE.amberInk,
       })
-      .setResolution(stageDpr())
+      .setResolution(renderScale())
       .setOrigin(0.5)
       .setVisible(false);
 
@@ -287,7 +287,7 @@ export class PlotView {
         stroke: "#120f09",
         strokeThickness: 4,
       })
-      .setResolution(stageDpr())
+      .setResolution(renderScale())
       .setOrigin(0.5)
       .setDepth(6);
 

@@ -6,7 +6,7 @@ import {
   DESIGN_HEIGHT,
   DESIGN_WIDTH,
   STAGE_PADDING,
-  stageDpr,
+  renderScale,
 } from "../display/stage";
 import { FONT_FAMILY, PALETTE, STAGE_COLOR } from "../display/theme";
 import { deliverableOrderCount } from "../display/viewModels";
@@ -102,7 +102,7 @@ export class FarmScene extends Phaser.Scene {
 
   create(): void {
     this.configureStage();
-    const resolution = stageDpr();
+    const resolution = renderScale();
 
     this.createBackground();
     this.createFieldHead();
@@ -143,7 +143,13 @@ export class FarmScene extends Phaser.Scene {
       .setVisible(false);
 
     this.unsubscribe = this.store.subscribe(() => this.refresh());
+    // 窗口尺寸变化后画布后备分辨率随之改变，相机缩放必须同步，否则世界坐标会被拉伸。
+    // 注意：这里只能调 applyCamera，不能调 configureStage —— 后者内部的
+    // scale.refresh() 会再次派发 RESIZE，形成无限递归。
+    const onResize = () => this.applyCamera();
+    this.scale.on(Phaser.Scale.Events.RESIZE, onResize);
     this.events.once("shutdown", () => {
+      this.scale.off(Phaser.Scale.Events.RESIZE, onResize);
       this.unsubscribe?.();
       this.unsubscribe = undefined;
       this.destroyPanels();
@@ -175,17 +181,22 @@ export class FarmScene extends Phaser.Scene {
     this.refresh();
   }
 
-  // 后备分辨率已是设计尺寸 ×dpr，这里把 CSS 尺寸锁死为设计尺寸，
-  // 再用相机放大 dpr 倍，使世界坐标仍按 1280×720 编排并按物理像素成像。
+  // 只在场景创建时执行一次：锁定画布 CSS 尺寸并同步相机。
+  // refresh() 会派发 RESIZE 事件，因此它只出现在这里，不出现在 resize 回调中。
   private configureStage(): void {
-    const dpr = stageDpr();
     const canvas = this.game.canvas;
     canvas.style.width = `${DESIGN_WIDTH}px`;
     canvas.style.height = `${DESIGN_HEIGHT}px`;
     // CSS 尺寸改变后重算 displayScale，指针坐标才能映射回后备像素。
     this.scale.refresh();
+    this.applyCamera();
+  }
+
+  // 后备分辨率是设计尺寸 × 渲染系数，相机放大同样倍数后，
+  // 世界坐标仍按 1280×720 编排并按物理像素成像。
+  private applyCamera(): void {
     this.cameras.main
-      .setZoom(dpr)
+      .setZoom(renderScale())
       .centerOn(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2);
   }
 
@@ -227,7 +238,7 @@ export class FarmScene extends Phaser.Scene {
         fontStyle: "bold",
         color: PALETTE.ink,
       })
-      .setResolution(stageDpr())
+      .setResolution(renderScale())
       .setOrigin(0, 0.5);
     this.add.rectangle(title.x + title.width + 14, y, 22, 1, STAGE_COLOR.amber, 0.75);
     return title;
@@ -241,7 +252,7 @@ export class FarmScene extends Phaser.Scene {
         fontSize: "14px",
         color: PALETTE.ink3,
       })
-      .setResolution(stageDpr())
+      .setResolution(renderScale())
       .setOrigin(1, 0.5);
   }
 
@@ -253,7 +264,7 @@ export class FarmScene extends Phaser.Scene {
         fontSize: "13px",
         color: PALETTE.ink3,
       })
-      .setResolution(stageDpr())
+      .setResolution(renderScale())
       .setOrigin(1, 0.5);
   }
 
