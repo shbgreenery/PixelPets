@@ -1,0 +1,10 @@
+{
+  "name": "slow-farm-pc",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "start": "pnpm --filter ./client run build && pnpm --filter ./server run start",
+    "test": "pnpm run test:core && pnpm --filter ./server run test && pnpm --filter ./client run test",
+    "test:core": "node server/scripts/run-core-tests.mjs"
+  }
+}

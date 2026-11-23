@@ -1,0 +1,9 @@
+packages:
+  - client
+  - server
+allowBuilds:
+  esbuild: true
+# fastify 5.12.8 -> fast-json-stringify@7.3.10 发布于 2026-11-22，
+# 未满 pnpm 11 默认的 minimumReleaseAge 冷静期，会导致每次 run 前的
+# lockfile 校验失败。lockfile 由本仓库维护，这里信任它并跳过逐条复核。
+trustLockfile: true

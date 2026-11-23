@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>慢慢农场</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #120f09;
+        overflow: hidden;
+      }
+      /* 舞台固定 1280×720，与 src/display/stage.ts 的 DESIGN_WIDTH/HEIGHT 一致，窗口只负责居中。 */
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #stage {
+        position: relative;
+        flex: none;
+        width: 1280px;
+        height: 720px;
+        overflow: hidden;
+      }
+      #game {
+        position: absolute;
+        inset: 0;
+      }
+      /* 画布后备分辨率由 DPR 决定，这里把显示尺寸锁死为设计尺寸，避免被拉伸发糊。 */
+      #game canvas {
+        display: block;
+        width: 1280px;
+        height: 720px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"><div id="game"></div></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
