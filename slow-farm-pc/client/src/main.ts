@@ -69,6 +69,13 @@ async function bootstrap(): Promise<void> {
       mode: Phaser.Scale.NONE,
       autoCenter: Phaser.Scale.NO_CENTER,
     },
+    // Phaser 默认在 window 上额外挂一对 mousedown/mouseup 监听，
+    // 且 onMouseUp 不校验事件目标——DOM 弹层上的点击会漏进画布，
+    // 造成"点弹窗却触发了下面的地块"。本项目没有拖拽玩法，
+    // 关掉 window 级监听即可；代价仅是 POINTER_UP_OUTSIDE 不再派发。
+    input: {
+      windowEvents: false,
+    },
   });
 
   game.scene.add("FarmScene", FarmScene, true, { store });
