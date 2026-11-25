@@ -3,10 +3,8 @@ import {
   DESIGN_HEIGHT,
   DESIGN_WIDTH,
   MAX_FIT_SCALE,
-  MAX_RENDER_SCALE,
   MIN_FIT_SCALE,
   fitScaleFor,
-  renderScaleFor,
 } from "./stage";
 
 describe("fitScaleFor", () => {
@@ -36,24 +34,5 @@ describe("fitScaleFor", () => {
   it("尺寸非法时退回 1 倍", () => {
     expect(fitScaleFor(0, 720)).toBe(1);
     expect(fitScaleFor(Number.NaN, 720)).toBe(1);
-  });
-});
-
-describe("renderScaleFor", () => {
-  it("等于 dpr × 显示系数", () => {
-    expect(renderScaleFor(1, 1.5)).toBeCloseTo(1.5, 6);
-    expect(renderScaleFor(2, 1)).toBe(2);
-  });
-
-  it("dpr 上限为 2：3x 屏不按 3 倍渲染", () => {
-    expect(renderScaleFor(3, 1)).toBe(2);
-  });
-
-  it("总倍数被 MAX_RENDER_SCALE 封顶，4K 屏不无谓放大后备分辨率", () => {
-    expect(renderScaleFor(2, 3)).toBe(MAX_RENDER_SCALE);
-  });
-
-  it("dpr 非法时按 1 处理", () => {
-    expect(renderScaleFor(0, 1)).toBe(1);
   });
 });

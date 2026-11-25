@@ -36,6 +36,9 @@ export const ACTION_TYPES = [
   "buyGems",
   "grantAdGems",
   "grantPaidGems",
+  "collectAllMachines",
+  "enqueueAll",
+  "useHourglassOnMachines",
 ] as const;
 
 export type ActionType = (typeof ACTION_TYPES)[number];
@@ -77,6 +80,9 @@ const handlers: Record<ActionType, ActionHandler> = {
   useHourglass: (state, args, now) => core.useHourglass(state, args.target, now, RULES),
   useHourglassOnPlots: (state, _args, now) => core.useHourglassOnPlots(state, now, RULES),
   useHourglassOnAnimals: (state, args, now) => core.useHourglassOnAnimals(state, args.kind, now, RULES),
+  collectAllMachines: (state, _args, now) => core.collectAllMachines(state, now, RULES),
+  enqueueAll: (state, _args, now) => core.enqueueAll(state, now, RULES),
+  useHourglassOnMachines: (state, _args, now) => core.useHourglassOnMachines(state, now, RULES),
   visitTab: (state, args) => ({ ok: true, tasks: core.visitTab(state, args.tab, RULES) }),
   buyGems: (state) => core.grantPaidGems(state, RULES),
   grantAdGems: (state) => core.grantAdGems(state, RULES),

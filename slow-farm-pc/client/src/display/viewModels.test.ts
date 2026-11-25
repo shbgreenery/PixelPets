@@ -5,6 +5,7 @@ import {
   machineView,
   orderShortfall,
   orderView,
+  recipeShortfall,
 } from "./viewModels";
 
 const rules: Rules = {
@@ -194,5 +195,31 @@ describe("订单角标与缺口文案", () => {
     expect(orderShortfall(daily)).toBe("还差 小麦 ×4");
     expect(orderShortfall(o1)).toBe("");
     expect(orderShortfall(o2)).toBe("还差 玉米 ×2");
+  });
+});
+
+describe("recipeShortfall", () => {
+  const shortfallRules: Rules = {
+    CROPS: {},
+    ITEMS: {
+      wheat: { name: "小麦", sellPrice: 2, unlockLevel: 1, category: "crop" },
+      corn: { name: "玉米", sellPrice: 3, unlockLevel: 1, category: "crop" },
+      flour: { name: "面粉", sellPrice: 10, unlockLevel: 1, category: "product" },
+    },
+    LEVELS: [0],
+    RECIPES: {
+      bread: { name: "面包", machine: "bakery", input: { flour: 2, corn: 1 }, ms: 1000, output: {}, unlockLevel: 1 },
+    },
+  };
+
+  it("列出缺少的物品与数量", () => {
+    const state = { coins: 0, gems: 0, xp: 0, plots: [], silo: { flour: 1 } } as GameState;
+    expect(recipeShortfall(state, "bread", shortfallRules)).toBe("还差 面粉 ×1、玉米 ×1");
+  });
+
+  it("材料齐全或配方未知时为空串", () => {
+    const state = { coins: 0, gems: 0, xp: 0, plots: [], silo: { flour: 2, corn: 1 } } as GameState;
+    expect(recipeShortfall(state, "bread", shortfallRules)).toBe("");
+    expect(recipeShortfall(state, "missing", shortfallRules)).toBe("");
   });
 });

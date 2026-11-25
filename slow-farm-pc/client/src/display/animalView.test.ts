@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GameState, Rules } from "../api/client";
 import { achievementView, taskView } from "./achievementView";
-import { animalView } from "./animalView";
+import { animalView, herdSummary } from "./animalView";
 
 const rules: Rules = {
   CROPS: {},
@@ -123,6 +123,26 @@ describe("animalView", () => {
     expect(view.canFeed).toBe(false);
     expect(view.canCollect).toBe(false);
     expect(view.canRush).toBe(false);
+  });
+
+  it("畜舍聚合计数与摘要", () => {
+    const now = 100_000;
+    const state = makeState({
+      silo: { feed: 1 },
+      animals: {
+        chicken: {
+          slots: 4,
+          list: [{ readyAt: 0 }, { readyAt: now + 30_000 }, { readyAt: now - 1_000 }],
+        },
+      },
+    });
+
+    const view = animalView(state, "chicken", now);
+    expect(view.counts).toEqual({ hungry: 1, growing: 1, ready: 1 });
+    expect(herdSummary(view.counts)).toBe("可收取 1 · 待喂食 1");
+    expect(herdSummary({ hungry: 1, growing: 1, ready: 0 })).toBe("待喂食 1 · 产出中 1");
+    expect(herdSummary({ hungry: 0, growing: 3, ready: 0 })).toBe("产出中 3");
+    expect(herdSummary({ hungry: 0, growing: 0, ready: 0 })).toBe("空");
   });
 });
 

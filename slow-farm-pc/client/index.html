@@ -18,7 +18,7 @@
       }
       /* 舞台固定 1280×720 设计单位，与 src/display/stage.ts 的 DESIGN_WIDTH/HEIGHT 一致。
          显示大小靠 transform 等比缩放（由 stage.ts 的 applyStageFit 写入），
-         布局盒不变，DOM 覆盖层与画布因此共享同一套坐标。 */
+         布局盒不变，DOM 覆盖层内部因此共享同一套坐标。 */
       #stage {
         position: absolute;
         left: 50%;
@@ -29,21 +29,10 @@
         transform-origin: center center;
         transform: translate(-50%, -50%) scale(1);
       }
-      #game {
-        position: absolute;
-        inset: 0;
-      }
-      /* 画布的 CSS 尺寸恒为设计尺寸；清晰度由后备像素（渲染系数）保证，
-         屏幕放大交给 #stage 的 transform。 */
-      #game canvas {
-        display: block;
-        width: 1280px;
-        height: 720px;
-      }
     </style>
   </head>
   <body>
-    <div id="stage"><div id="game"></div></div>
+    <div id="stage"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

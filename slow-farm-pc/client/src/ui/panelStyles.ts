@@ -230,3 +230,85 @@ export function makeButton(
   button.addEventListener("click", onClick);
   return button;
 }
+
+// 左右分栏卡片：固定高度、内部各自滚动，避免整卡滚动导致左栏索引滚出视野。
+export const SPLIT_CARD_STYLE = [
+  CARD_STYLE,
+  "width: min(680px, 92%)",
+  "height: calc(100% - 96px)",
+  "display: flex",
+  "flex-direction: column",
+  "overflow: hidden",
+  "box-sizing: border-box",
+].join(";");
+
+export const QUICK_BAR_STYLE = [
+  "display: flex",
+  "align-items: center",
+  "gap: 8px",
+  "padding: 0 0 10px",
+  `border-bottom: 1px solid ${COLORS.panelBorder}`,
+  "flex: none",
+].join(";");
+
+export const SPLIT_BODY_STYLE = [
+  "display: grid",
+  "grid-template-columns: 160px minmax(0, 1fr)",
+  "gap: 12px",
+  "flex: 1 1 auto",
+  "min-height: 0",
+].join(";");
+
+export const SIDE_LIST_STYLE = "overflow-y: auto; min-height: 0; padding-right: 2px";
+
+export const SIDE_GROUP_TITLE_STYLE = [
+  "display: flex",
+  "align-items: center",
+  "justify-content: space-between",
+  "padding: 6px 4px 4px",
+  `font-size: ${FONT_SIZE.xs}px`,
+  `color: ${COLORS.muted}`,
+  "letter-spacing: 0.04em",
+  "cursor: pointer",
+  "user-select: none",
+].join(";");
+
+export const SIDE_ITEM_STYLE = [
+  "display: flex",
+  "align-items: center",
+  "gap: 6px",
+  "width: 100%",
+  "height: 32px",
+  "padding: 0 8px",
+  "border: 1px solid transparent",
+  "border-radius: 8px",
+  "background: transparent",
+  `color: ${COLORS.subtle}`,
+  "font: inherit",
+  "text-align: left",
+  "cursor: pointer",
+].join(";");
+
+export const SIDE_ITEM_ACTIVE = [
+  `background: ${SURFACE.activeAmber}`,
+  `border-color: ${COLORS.panelBorderStrong}`,
+  `color: ${COLORS.text}`,
+].join(";");
+
+export const DETAIL_STYLE = [
+  "min-height: 0",
+  "display: flex",
+  "flex-direction: column",
+  "gap: 8px",
+].join(";");
+
+// 详情区中段：队列与配方在这里滚动，标题行与底部低频区保持固定。
+export const DETAIL_SCROLL_STYLE = [
+  "overflow-y: auto",
+  "min-height: 0",
+  "flex: 1 1 auto",
+  "display: flex",
+  "flex-direction: column",
+  "gap: 8px",
+  "padding-right: 2px",
+].join(";");

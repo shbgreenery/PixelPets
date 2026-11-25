@@ -664,6 +664,77 @@ function collectReady(state, machineId, nowMs, rules) {
   return { ok: true, items, collected, skipped };
 }
 
+// 遍历所有机器收取已完成任务；仓库满的任务留在队列里，计入 skipped。
+function collectAllMachines(state, nowMs, rules) {
+  const items = {};
+  let collected = 0;
+  let skipped = 0;
+  for (const machineId of Object.keys(state.machines)) {
+    const result = collectReady(state, machineId, nowMs, rules);
+    if (!result.ok) continue;
+    collected += result.collected;
+    skipped += result.skipped;
+    for (const [itemId, quantity] of Object.entries(result.items)) {
+      items[itemId] = (items[itemId] || 0) + quantity;
+    }
+  }
+  return { ok: true, items, collected, skipped };
+}
+
+// 按配方定义顺序找该机器第一个已解锁且材料足够的配方；没有则返回 null。
+function autoRecipe(state, machineId, rules) {
+  for (const [recipeId, recipe] of Object.entries(rules.RECIPES)) {
+    if (recipe.machine !== machineId) continue;
+    if (!state.unlockedRecipes[recipeId]) continue;
+    const enough = Object.entries(recipe.input)
+      .every(function (entry) { return (state.silo[entry[0]] || 0) >= entry[1]; });
+    if (enough) return recipeId;
+  }
+  return null;
+}
+
+// 每台已建机器反复放入自动配方，直到队列满或材料耗尽；材料不足的机器跳过继续下一台。
+function enqueueAll(state, nowMs, rules) {
+  let queued = 0;
+  let blocked = null;
+  for (const machineId of Object.keys(state.machines)) {
+    const machine = state.machines[machineId];
+    if (!machine.unlocked) continue;
+    while (machine.queue.length < machine.queueSize) {
+      const recipeId = autoRecipe(state, machineId, rules);
+      if (recipeId === null) {
+        if (blocked === null) blocked = 'missing_input';
+        break;
+      }
+      const result = enqueue(state, machineId, recipeId, nowMs, rules);
+      if (!result.ok) {
+        if (blocked === null) blocked = result.reason;
+        break;
+      }
+      queued += 1;
+    }
+  }
+  return { ok: true, queued, blocked };
+}
+
+// 依次加速生产中的机器；沙漏用完时停止并把原因带回。
+function useHourglassOnMachines(state, nowMs, rules) {
+  let used = 0;
+  let stopped = null;
+  for (const machineId of Object.keys(state.machines)) {
+    const machine = state.machines[machineId];
+    if (!machine.unlocked) continue;
+    if (!machine.queue.some(function (job) { return job.readyAt > nowMs; })) continue;
+    if (!(state.hourglasses > 0)) {
+      stopped = 'no_hourglass';
+      break;
+    }
+    const result = useHourglass(state, { kind: 'machine', id: machineId }, nowMs, rules);
+    if (result.ok) used += 1;
+  }
+  return { ok: true, used, stopped };
+}
+
 function pickInt(rng, min, max) {
   return min + Math.floor(rng() * (max - min + 1));
 }
@@ -1237,6 +1308,9 @@ const CORE = {
   queueSlotCost,
   enqueue,
   collectReady,
+  collectAllMachines,
+  enqueueAll,
+  useHourglassOnMachines,
   generateOrder,
   deliverOrder,
   abandonOrder,

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { GameState, Meta, Plot, Rules, SaveSnapshot } from "../api/client";
 import type { StoreApi } from "../state/store";
 import { GameStore } from "../state/store";
-import { plotCommand } from "../scenes/plotCommand";
+import { plotCommand } from "../display/plotCommand";
 import { SeedPanel } from "./SeedPanel";
 
 const rules: Rules = {

@@ -8,9 +8,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "phaser": "4.2.1"
-  },
   "devDependencies": {
     "jsdom": "^31.0.1",
     "typescript": "^7.0.2",

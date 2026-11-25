@@ -278,4 +278,15 @@ describe("GameEngine", () => {
     expect(machine.queue[0].readyAt).toBe(current);
     expect(engine.snapshot().state.hourglasses).toBe(3);
   });
+
+  it("批量机器动作走 core 并递增 rev", async () => {
+    const { engine } = await makeEngine(() => new Date(2026, 0, 1, 9, 0, 0).getTime());
+    await engine.init();
+
+    const outcome = await engine.apply("collectAllMachines", {}, 1);
+
+    expect(outcome.status).toBe("ok");
+    expect(outcome.result).toMatchObject({ collected: 0, skipped: 0 });
+    expect(engine.snapshot().rev).toBe(2);
+  });
 });

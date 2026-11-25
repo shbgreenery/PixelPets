@@ -22,31 +22,6 @@ export const PALETTE = {
   clayInk: "#24100a",
 } as const;
 
-// Phaser 只接受 0xRRGGBB，场景层一律引用这里，不写字面色号。
-export const STAGE_COLOR = {
-  night0: 0x120f09,
-  night1: 0x191410,
-  night2: 0x221b14,
-  night3: 0x2b2318,
-  night4: 0x372c1f,
-  soil: 0x2f2619,
-  soilEmpty: 0x271f16,
-  soilRipe: 0x3b2c1b,
-  tray: 0x34291c,
-  line: 0x7a6648,
-  amber: 0xe8a33d,
-  amberSoft: 0xffc76b,
-  grass: 0x6f9448,
-  grassSoft: 0xa9c978,
-  clay: 0xb5643e,
-  claySoft: 0xd98052,
-  ink: 0xf3e9d7,
-  ink2: 0xcbb99e,
-  ink3: 0xa5947d,
-  black: 0x000000,
-  white: 0xffffff,
-} as const;
-
 // DOM 层色值：语义与 PALETTE 一一对应。
 export const COLORS = {
   amber: PALETTE.amber,

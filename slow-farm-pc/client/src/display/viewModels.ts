@@ -99,3 +99,18 @@ export function orderShortfall(order: OrderView): string {
     .map((line) => `${line.name} ×${line.need - line.have}`);
   return missing.length === 0 ? "" : `还差 ${missing.join("、")}`;
 }
+
+// 配方材料短缺：文案格式与 orderShortfall 保持一致，避免同一个面板体系里出现两种写法。
+export function recipeShortfall(state: GameState, recipeId: string, rules: Rules): string {
+  const recipe = rules.RECIPES?.[recipeId];
+  if (!recipe) return "";
+
+  const missing: string[] = [];
+  for (const [itemId, quantity] of Object.entries(recipe.input)) {
+    const have = state.silo[itemId] ?? 0;
+    if (have >= quantity) continue;
+    const name = rules.ITEMS[itemId]?.name ?? itemId;
+    missing.push(`${name} ×${quantity - have}`);
+  }
+  return missing.length === 0 ? "" : `还差 ${missing.join("、")}`;
+}
